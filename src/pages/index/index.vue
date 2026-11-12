@@ -99,15 +99,13 @@
       <!-- #endif -->
     </view>
 
-    <record-editor :show="editor.show" :theme-id="editor.themeId" @close="editor.show = false" />
   </view>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import RecordCard from '../../components/record-card.vue'
-import RecordEditor from '../../components/record-editor.vue'
 import { themes, records, ranges, inRange, themeCount, confirmRemove } from '../../store'
 
 const tabs = [
@@ -118,7 +116,6 @@ const tabs = [
 ]
 const tab = ref(0)
 const range = ref(0)
-const editor = reactive({ show: false, themeId: 1 })
 
 const statusBarHeight = ref(20)
 // #ifndef H5
@@ -143,7 +140,7 @@ const tagList = computed(() => {
 })
 
 function openEditor() {
-  editor.show = true
+  uni.navigateTo({ url: '/pages/edit/edit' })
 }
 
 function openTheme(id) {

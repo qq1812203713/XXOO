@@ -38,3 +38,27 @@ out('doc', svg('<rect x="4.5" y="3.5" width="15" height="17" rx="2.8"/><path d="
 out('clock', svg(shapes.clock, GREY, 1.7))
 out('history', svg('<path d="M4.6 12.6a7.6 7.6 0 1 0 2-5.8L4.4 9"/><path d="M4.2 4.8V9h4.2"/><path d="M12 8.2v4.2l2.8 1.7"/>', GREY, 1.8))
 out('plus-white', svg('<path d="M12 4.5v15M4.5 12h15"/>', '#fff', 2.4))
+
+// 记录编辑页
+const INK2 = '#3c4a47', SOFT = '#9a9d9b'
+out('tag-ink', svg(shapes.tag, INK2, 1.7))
+out('clock-ink', svg(shapes.clock, INK2, 1.7))
+out('heart', svg('<path d="M12 20.2S3.8 15.4 3.8 9.4A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 8.2 2.2c0 6-8.2 10.8-8.2 10.8Z"/>', INK, 1.8))
+out('coins', svg('<ellipse cx="13.5" cy="8" rx="6" ry="2.6"/><path d="M7.5 8v3c0 1.4 2.7 2.6 6 2.6s6-1.200 6-2.6V8"/><ellipse cx="10" cy="14.6" rx="6" ry="2.6"/><path d="M4 14.600v3c0 1.4 2.7 2.600 6 2.600s6-1.200 6-2.600v-3"/>', GREY, 1.6))
+out('smile', svg('<circle cx="12" cy="12" r="9"/><path d="M8.300 14c.9 1.500 2.200 2.300 3.700 2.300s2.800-.8 3.700-2.300"/><path d="M9 9.600v.6M15 9.600v.6"/>', INK2, 1.7))
+out('camera', svg('<path d="M4.500 8.500c0-.900.700-1.600 1.600-1.600h1.700l1.200-1.900h6l1.200 1.900h1.700c.9 0 1.600.7 1.600 1.600v8.600c0 .9-.7 1.600-1.600 1.600H6.100c-.9 0-1.600-.7-1.600-1.600Z"/><circle cx="12" cy="12.700" r="3"/>', GREY, 1.7))
+out('x-white', svg('<path d="M7 7l10 10M17 7 7 17"/>', '#fff', 2.6))
+out('x-green', svg('<path d="M6.500 6.500l11 11M17.500 6.500l-11 11"/>', '#2e6a4b', 2.2))
+out('plus-grey', svg('<path d="M12 5v14M5 12h14"/>', GREY, 2))
+const eyes = '<path d="M9 9.700v.5M15 9.700v.5"/>'
+const faces = [
+  eyes + '<path d="M7.800 13.200h8.400c-.3 2.300-2 3.900-4.200 3.900s-3.900-1.600-4.200-3.900Z"/>',
+  eyes + '<path d="M8.300 14c.9 1.500 2.200 2.300 3.700 2.300s2.800-.8 3.700-2.300"/>',
+  eyes + '<path d="M8.600 15h6.800"/>',
+  eyes + '<path d="M8.300 16.200c.9-1.500 2.200-2.300 3.700-2.300s2.800.8 3.700 2.300"/>',
+  '<path d="M8 8.800l2.200 1.200L8 11.200M16 8.800l-2.200 1.200 2.200 1.200"/><path d="M8.400 16l1.800-1.200 1.800 1.200 1.800-1.200 1.800 1.200"/>',
+]
+faces.forEach((f, i) => {
+  out(`face-${i + 1}`, svg('<circle cx="12" cy="12" r="9"/>' + f, SOFT, 1.6))
+  out(`face-${i + 1}-fill`, svg('<circle cx="12" cy="12" r="9"/>' + f, ORANGE, 1.9))
+})

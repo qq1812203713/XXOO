@@ -41,7 +41,7 @@
       <view class="stat stat-r">
         <image class="stat-icon" src="/static/icons/clock.svg" />
         <text class="stat-l">累计</text>
-        <text class="stat-n mid">{{ theme.hours }}</text>
+        <text class="stat-n mid">{{ hours }}</text>
         <text class="stat-l">小时</text>
       </view>
     </view>
@@ -70,6 +70,7 @@
             :style="{ height: imgHeight(r) }"
             :src="r.imageWide || r.image"
             mode="aspectFill"
+            @tap="preview(r)"
           />
           <view class="rec-sync">
             <image class="rec-sync-icon" src="/static/icons/check.svg" />
@@ -88,7 +89,7 @@
           <image class="btn-icon" src="/static/icons/history.svg" />
           <text>回顾</text>
         </view>
-        <view class="btn-add" @tap="editorShow = true">
+        <view class="btn-add" @tap="addNew">
           <image class="btn-icon" src="/static/icons/plus-white.svg" />
           <text>记录新经历</text>
         </view>
@@ -98,19 +99,16 @@
       <!-- #endif -->
     </view>
 
-    <record-editor :show="editorShow" :theme-id="theme.id" @close="editorShow = false" />
   </view>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import RecordEditor from '../../components/record-editor.vue'
-import { themes, records, themeCount, setThemeDesc, confirmRemove, monthDay, weekday, hm } from '../../store'
+import { themes, records, themeCount, themeHours, setThemeDesc, confirmRemove, monthDay, weekday, hm } from '../../store'
 
 const themeId = ref(1)
 const tag = ref('')
-const editorShow = ref(false)
 
 const statusBarHeight = ref(20)
 const navStyle = ref('')
@@ -137,6 +135,7 @@ onLoad((q) => {
 const theme = computed(() => themes.value.find((t) => t.id === themeId.value))
 const mine = computed(() => records.value.filter((r) => r.themeId === themeId.value))
 const count = computed(() => themeCount(theme.value))
+const hours = computed(() => themeHours(theme.value))
 const list = computed(() => (tag.value ? mine.value.filter((r) => (r.tags || []).includes(tag.value)) : mine.value))
 
 // 筛选标签：主题预设的在前，再补上用户自己记录里用过的；没有预设时取出现最多的三个
@@ -158,6 +157,15 @@ const imgHeight = (r) => ((r.imageH || 155) * 750) / 852 + 'rpx'
 function back() {
   if (getCurrentPages().length > 1) uni.navigateBack()
   else uni.reLaunch({ url: '/pages/index/index' })
+}
+
+function preview(r) {
+  const urls = r.images && r.images.length ? r.images : [r.imageWide || r.image]
+  uni.previewImage({ urls })
+}
+
+function addNew() {
+  uni.navigateTo({ url: '/pages/edit/edit?themeId=' + themeId.value })
 }
 
 function review() {

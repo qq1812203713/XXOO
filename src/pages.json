@@ -13,6 +13,13 @@
         "navigationStyle": "custom",
         "navigationBarTitleText": "主题详情"
       }
+    },
+    {
+      "path": "pages/edit/edit",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "记一件事"
+      }
     }
   ],
   "globalStyle": {

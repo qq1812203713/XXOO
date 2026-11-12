@@ -127,12 +127,73 @@ export function themeCount(t) {
   return t.base + records.value.filter((r) => r.themeId === t.id).length
 }
 
-export function addRecord({ text, themeId, tags }) {
-  records.value = [
-    { id: 'r-' + Date.now(), time: Date.now(), themeId, text, tags, synced: false },
-    ...records.value,
-  ]
+/** 主题累计时长：预设的历史时长 + 各条记录填写的用时 */
+export function themeHours(t) {
+  const extra = records.value.filter((r) => r.themeId === t.id).reduce((n, r) => n + (Number(r.hours) || 0), 0)
+  return Math.round((t.hours + extra) * 10) / 10
+}
+
+export function addRecord({ text, themeId, tags, time, images = [], cost, hours, mood }) {
+  const rec = {
+    id: 'r-' + Date.now(),
+    time: time || Date.now(),
+    themeId,
+    text,
+    tags,
+    images,
+    image: images[0] || '',
+    cost,
+    hours,
+    mood,
+    synced: false,
+  }
+  records.value = [rec, ...records.value].sort((a, b) => b.time - a.time)
   persist()
+}
+
+/* ---------- 草稿 ---------- */
+const DRAFT_KEY = 'zlm_draft_v1'
+
+export const emptyDraft = (themeId = 1) => ({
+  themeId,
+  text: '',
+  images: [],
+  tags: [],
+  time: 0, // 0 表示“现在”
+  cost: '',
+  hours: '',
+  mood: -1,
+})
+
+// 首次使用时的示例草稿，内容与设计稿一致；保存或清空后不再出现
+const sampleDraft = () => ({
+  themeId: 1,
+  text: '今天沿着河边走了很久，发现熟悉的城市也有新的风景。',
+  images: ['/static/img/draft-1.jpg', '/static/img/draft-2.jpg'],
+  tags: ['小确幸', '留给自己'],
+  time: daysAgoAt(0, 18, 30),
+  cost: '',
+  hours: '',
+  mood: -1,
+  sample: true,
+})
+
+export function loadDraft() {
+  let d
+  try {
+    d = uni.getStorageSync(DRAFT_KEY)
+  } catch (e) {}
+  if (d === '' || d === undefined || d === null) return sampleDraft()
+  return d && d.themeId ? { ...emptyDraft(), ...d } : null
+}
+
+export function saveDraft(d) {
+  uni.setStorageSync(DRAFT_KEY, d)
+}
+
+/** 保存成记录后清掉草稿（写入 0 作为“已用过”的标记，示例草稿不再出现） */
+export function clearDraft() {
+  uni.setStorageSync(DRAFT_KEY, 0)
 }
 
 export function removeRecord(id) {
@@ -164,6 +225,11 @@ export const monthDay = (ts) => {
 }
 
 export const weekday = (ts) => WEEK[new Date(ts).getDay()]
+
+export const fullDate = (ts) => {
+  const d = new Date(ts)
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${weekday(ts)}`
+}
 
 /** 首页用的相对时间：今天 18:30 / 昨天 18:30 / 10月26日 18:30 */
 export function formatTime(ts) {
