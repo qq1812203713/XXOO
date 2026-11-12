@@ -1,0 +1,10 @@
+/* 设计稿宽 852px（iPhone 15，393pt）。p(设计稿像素) 换算成 rpx，各机型等比缩放 */
+@function p($px) {
+  @return $px * 0.88028 * 1rpx;
+}
+
+$bg: #fbf8f3;
+$ink: #1f302c;
+$text: #1c1b1c;
+$grey: #7b7f82;
+$orange: #f9844e;
