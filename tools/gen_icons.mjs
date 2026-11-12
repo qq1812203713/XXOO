@@ -28,3 +28,13 @@ for (const n of ['home', 'tag', 'clock', 'user']) {
   out(`tab-${n}`, svg(shapes[n], GREY, 1.8))
   out(`tab-${n}-fill`, svg(n === 'home' ? homeFill : filled[n], ORANGE, 1.8, ORANGE))
 }
+
+// 主题详情页
+const INK = '#1f302c'
+out('back', svg('<path d="M15 4.5 7.5 12l7.5 7.5"/>', INK, 2.2))
+out('pencil', svg('<path d="M4.2 19.8l.9-4.3L16.6 4a2.1 2.1 0 0 1 3 0l.4.4a2.1 2.1 0 0 1 0 3L8.5 18.9l-4.3.9Z"/><path d="M14.6 6l3.4 3.4"/>', GREY, 1.8))
+out('calendar', svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.8"/><path d="M8 3v4M16 3v4M3.5 10h17M9 15.2l2 2 3.6-3.8"/>', GREY, 1.7))
+out('doc', svg('<rect x="4.5" y="3.5" width="15" height="17" rx="2.8"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4"/>', GREY, 1.7))
+out('clock', svg(shapes.clock, GREY, 1.7))
+out('history', svg('<path d="M4.6 12.6a7.6 7.6 0 1 0 2-5.8L4.4 9"/><path d="M4.2 4.8V9h4.2"/><path d="M12 8.2v4.2l2.8 1.7"/>', GREY, 1.8))
+out('plus-white', svg('<path d="M12 4.5v15M4.5 12h15"/>', '#fff', 2.4))

@@ -6,6 +6,13 @@
         "navigationStyle": "custom",
         "navigationBarTitleText": "值了吗"
       }
+    },
+    {
+      "path": "pages/theme/theme",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "主题详情"
+      }
     }
   ],
   "globalStyle": {

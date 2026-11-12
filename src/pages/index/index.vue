@@ -34,7 +34,7 @@
       </view>
 
       <view class="grid">
-        <view v-for="t in themeList" :key="t.id" class="card" @tap="openEditor(t.id)">
+        <view v-for="t in themeList" :key="t.id" class="card" @tap="openTheme(t.id)">
           <image class="card-img" :src="t.cover" mode="aspectFill" />
           <text class="card-title">{{ t.title }}</text>
           <text class="card-sub">{{ t.count }} 条经历</text>
@@ -52,7 +52,7 @@
       </view>
 
       <view class="records">
-        <record-card v-for="r in filtered" :key="r.id" :record="r" @remove="remove(r)" />
+        <record-card v-for="r in filtered" :key="r.id" :record="r" @remove="confirmRemove(r)" />
         <view v-if="!filtered.length" class="empty">这段时间还没有记录</view>
       </view>
     </view>
@@ -70,7 +70,7 @@
     <view v-else-if="tab === 2" class="sub-page">
       <text class="sub-h">回顾</text>
       <view class="records flush">
-        <record-card v-for="r in records" :key="r.id" :record="r" @remove="remove(r)" />
+        <record-card v-for="r in records" :key="r.id" :record="r" @remove="confirmRemove(r)" />
       </view>
     </view>
 
@@ -99,27 +99,16 @@
       <!-- #endif -->
     </view>
 
-    <!-- ================= 写记录 ================= -->
-    <view v-if="editor.show" class="mask" @tap="editor.show = false">
-      <view class="sheet" @tap.stop>
-        <text class="sheet-title">今天想记点什么？</text>
-        <textarea v-model="editor.text" class="sheet-input" placeholder="一段经历，一个念头，都可以。" maxlength="300" :auto-height="false" :show-confirm-bar="false" />
-        <text class="sheet-label">放进哪个主题</text>
-        <view class="chips">
-          <view v-for="t in themeList" :key="t.id" class="chip" :class="{ on: editor.themeId === t.id }" @tap="editor.themeId = t.id">{{ t.title }}</view>
-        </view>
-        <text class="sheet-label">标签（空格分隔，可不填）</text>
-        <input v-model="editor.tags" class="sheet-tags" placeholder="小确幸 留给自己" />
-        <view class="sheet-btn" :class="{ off: !editor.text.trim() }" @tap="save">记下来</view>
-      </view>
-    </view>
+    <record-editor :show="editor.show" :theme-id="editor.themeId" @close="editor.show = false" />
   </view>
 </template>
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import RecordCard from '../../components/record-card.vue'
-import { themes, ranges, loadRecords, saveRecords, inRange } from '../../store'
+import RecordEditor from '../../components/record-editor.vue'
+import { themes, records, ranges, inRange, themeCount, confirmRemove } from '../../store'
 
 const tabs = [
   { key: 'home', label: '首页' },
@@ -129,17 +118,20 @@ const tabs = [
 ]
 const tab = ref(0)
 const range = ref(0)
-const records = ref(loadRecords())
-const editor = reactive({ show: false, text: '', themeId: 1, tags: '' })
+const editor = reactive({ show: false, themeId: 1 })
 
 const statusBarHeight = ref(20)
 // #ifndef H5
-const sys = uni.getSystemInfoSync()
-statusBarHeight.value = sys.statusBarHeight || 20
+statusBarHeight.value = uni.getSystemInfoSync().statusBarHeight || 20
 // #endif
-const themeList = computed(() =>
-  themes.map((t) => ({ ...t, count: t.base + records.value.filter((r) => r.themeId === t.id).length }))
-)
+
+// 从其它页面带 ?tab=2 回来时直接切到对应标签页
+onLoad((q) => {
+  const i = Number(q && q.tab)
+  if (i >= 0 && i < tabs.length) tab.value = i
+})
+
+const themeList = computed(() => themes.value.map((t) => ({ ...t, count: themeCount(t) })))
 const totalCount = computed(() => themeList.value.reduce((n, t) => n + t.count, 0))
 const filtered = computed(() => records.value.filter((r) => inRange(r.time, range.value)))
 const tagList = computed(() => {
@@ -150,36 +142,12 @@ const tagList = computed(() => {
     .sort((a, b) => b.count - a.count)
 })
 
-function openEditor(themeId) {
-  editor.text = ''
-  editor.tags = ''
-  if (typeof themeId === 'number') editor.themeId = themeId
+function openEditor() {
   editor.show = true
 }
 
-function save() {
-  const text = editor.text.trim()
-  if (!text) return
-  const tags = editor.tags.split(/[\s,，#]+/).filter(Boolean).slice(0, 3)
-  records.value = [
-    { id: 'r-' + Date.now(), time: Date.now(), themeId: editor.themeId, text, tags, image: '', synced: false },
-    ...records.value,
-  ]
-  saveRecords(records.value)
-  editor.show = false
-}
-
-function remove(r) {
-  uni.showModal({
-    title: '删除这条记录？',
-    content: '删除后无法恢复',
-    confirmColor: '#f9844e',
-    success: (res) => {
-      if (!res.confirm) return
-      records.value = records.value.filter((x) => x.id !== r.id)
-      saveRecords(records.value)
-    },
-  })
+function openTheme(id) {
+  uni.navigateTo({ url: '/pages/theme/theme?id=' + id })
 }
 
 function pickRange() {
@@ -538,90 +506,5 @@ function pickRange() {
   transform: translateY(p(20));
   border-radius: p(5);
   background: #000;
-}
-
-/* ---------- 写记录弹层 ---------- */
-.mask {
-  position: fixed;
-  left: 50%;
-  width: 750rpx;
-  margin-left: -375rpx;
-  top: 0;
-  height: 100%;
-  z-index: 20;
-  display: flex;
-  align-items: flex-end;
-  background: rgba(30, 25, 20, 0.4);
-}
-.sheet {
-  width: 100%;
-  padding: p(44) p(40) calc(#{p(44)} + env(safe-area-inset-bottom));
-  border-radius: p(36) p(36) 0 0;
-  background: $bg;
-}
-.sheet-title {
-  display: block;
-  font-size: p(38);
-  font-weight: 600;
-  color: $ink;
-}
-.sheet-input {
-  width: 100%;
-  height: p(220);
-  margin-top: p(26);
-  padding: p(24);
-  border-radius: p(22);
-  background: #fff;
-  font-size: p(30);
-  line-height: p(42);
-}
-.sheet-label {
-  display: block;
-  margin-top: p(30);
-  font-size: p(24);
-  color: $grey;
-}
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  margin-top: p(14);
-}
-.chip {
-  margin: 0 p(14) p(14) 0;
-  padding: 0 p(22);
-  height: p(56);
-  line-height: p(56);
-  border-radius: p(28);
-  background: #fff;
-  border: 1px solid #e6e3dd;
-  font-size: p(25);
-  color: #4a4a48;
-}
-.chip.on {
-  border-color: $orange;
-  background: #fff1e8;
-  color: #d9622c;
-}
-.sheet-tags {
-  height: p(76);
-  margin-top: p(14);
-  padding: 0 p(24);
-  border-radius: p(22);
-  background: #fff;
-  font-size: p(28);
-}
-.sheet-btn {
-  margin-top: p(36);
-  height: p(92);
-  line-height: p(92);
-  border-radius: p(46);
-  background: linear-gradient(160deg, #fb8d57, #f57a45);
-  color: #fff;
-  text-align: center;
-  font-size: p(32);
-  font-weight: 600;
-}
-.sheet-btn.off {
-  opacity: 0.45;
 }
 </style>

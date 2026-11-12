@@ -1,9 +1,9 @@
 <template>
   <view class="rec" @longpress="$emit('remove')">
-    <image v-if="record.image" class="rec-img" :src="record.image" mode="aspectFill" />
-    <view class="rec-body" :class="{ wide: !record.image }">
+    <image v-if="thumb" class="rec-img" :src="thumb" mode="aspectFill" />
+    <view class="rec-body" :class="{ wide: !thumb }">
       <text class="rec-meta">{{ meta }}</text>
-      <text class="rec-text">{{ record.text }}</text>
+      <text class="rec-text">{{ body }}</text>
       <view v-if="record.tags && record.tags.length" class="rec-tags">
         <text v-for="t in record.tags" :key="t" class="rec-tag"># {{ t }}</text>
       </view>
@@ -22,8 +22,11 @@ import { themes, formatTime } from '../store'
 const props = defineProps({ record: { type: Object, required: true } })
 defineEmits(['remove'])
 
+const thumb = computed(() => props.record.image || props.record.imageWide || '')
+// 首页卡片较窄，正文自然折行，去掉为详情页准备的手动换行
+const body = computed(() => props.record.text.replace(/\n/g, ''))
 const meta = computed(() => {
-  const theme = themes.find((t) => t.id === props.record.themeId)
+  const theme = themes.value.find((t) => t.id === props.record.themeId)
   return formatTime(props.record.time) + (theme ? ' · ' + theme.title : '')
 })
 </script>
