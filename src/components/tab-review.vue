@@ -148,11 +148,11 @@ function share() {
 
 <style lang="scss" scoped>
 @function d($px) {
-  @return dw($px, 768);
+  @return dw($px, 650);
 }
 
 .wrap {
-  padding: 0 d(78) d(20) d(79);
+  padding: 0 d(28) d(30);
 }
 .head {
   position: relative;
@@ -161,7 +161,7 @@ function share() {
 .title {
   position: absolute;
   left: d(1);
-  top: d(33);
+  top: d(26);
   font-size: d(62);
   line-height: d(72);
   font-weight: 700;
@@ -193,6 +193,7 @@ function share() {
 
 .pickers {
   display: flex;
+  margin-top: d(4);
 }
 .pick {
   display: flex;
@@ -205,7 +206,7 @@ function share() {
 }
 .pick-theme {
   flex: none;
-  width: d(375);
+  width: d(360);
   margin-right: d(14);
   padding: 0 d(24) 0 d(8);
 }
@@ -238,8 +239,8 @@ function share() {
 .stats {
   display: flex;
   align-items: center;
-  height: d(106);
-  margin-top: d(23);
+  height: d(116);
+  margin-top: d(24);
   border-radius: d(24);
   background: #fde6d0;
 }
@@ -277,8 +278,8 @@ function share() {
   box-shadow: 0 d(2) d(12) rgba(90, 70, 40, 0.07);
 }
 .ai {
-  margin-top: d(21);
-  padding: d(22) d(26) d(22);
+  margin-top: d(24);
+  padding: d(26) d(26) d(26);
 }
 .ai-head {
   display: flex;
@@ -308,7 +309,7 @@ function share() {
   display: block;
   margin-top: d(11);
   font-size: d(25.5);
-  line-height: d(34);
+  line-height: d(39);
   color: #1c1b1c;
 }
 .ai-empty {
@@ -339,14 +340,14 @@ function share() {
 }
 
 .src {
-  margin-top: d(14);
-  padding: d(12) d(18) d(15) d(26);
+  margin-top: d(20);
+  padding: d(20) d(18) d(22) d(26);
 }
 .src-head {
   display: flex;
   align-items: center;
   height: d(44);
-  margin-bottom: d(12);
+  margin-bottom: d(18);
   padding-right: d(8);
 }
 .src-title {
@@ -363,7 +364,7 @@ function share() {
   display: flex;
   align-items: center;
   height: d(72);
-  margin-bottom: d(12);
+  margin-bottom: d(20);
 }
 .src-img {
   flex: none;
@@ -408,20 +409,20 @@ function share() {
 
 .btns {
   display: flex;
-  margin-top: d(23);
+  margin-top: d(28);
 }
 .btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: d(63);
-  border-radius: d(32);
+  height: d(70);
+  border-radius: d(35);
   font-size: d(29);
   font-weight: 500;
 }
 .btn-again {
   flex: none;
-  width: d(297);
+  width: d(270);
   margin-right: d(15);
   border: 1px solid #a9aeaa;
   background: #fbf8f3;

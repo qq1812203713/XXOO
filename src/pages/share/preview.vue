@@ -266,6 +266,10 @@ async function drawCard() {
 @function d($px) {
   @return dw($px, 768);
 }
+/* 分享卡片整体比设计稿放大 30%，文字才看得清 */
+@function c($px) {
+  @return dw($px * 1.3, 768);
+}
 
 .page {
   width: 750rpx;
@@ -300,16 +304,16 @@ async function drawCard() {
 }
 
 .card {
-  width: d(420);
-  margin: d(13) auto 0;
-  border-radius: d(16);
+  width: c(420);
+  margin: c(13) auto 0;
+  border-radius: c(16);
   overflow: hidden;
   background: #fff;
-  box-shadow: 0 d(6) d(22) rgba(60, 45, 25, 0.16);
+  box-shadow: 0 c(6) c(22) rgba(60, 45, 25, 0.16);
 }
 .card-cover {
   position: relative;
-  height: d(258);
+  height: c(258);
 }
 .card-cover-img {
   display: block;
@@ -318,23 +322,23 @@ async function drawCard() {
 }
 .card-logo {
   position: absolute;
-  left: d(25);
-  bottom: d(14);
-  width: d(76);
+  left: c(25);
+  bottom: c(14);
+  width: c(76);
 }
 .card-body {
-  padding: d(24) d(27) d(20);
+  padding: c(24) c(27) c(20);
 }
 .card-title {
   position: relative;
-  height: d(64);
-  margin-bottom: d(8);
+  height: c(64);
+  margin-bottom: c(8);
 }
 .card-title-text {
   position: relative;
   z-index: 1;
-  font-size: d(38);
-  line-height: d(56);
+  font-size: c(38);
+  line-height: c(56);
   font-weight: 700;
   color: #1c1b1c;
   white-space: nowrap;
@@ -342,83 +346,84 @@ async function drawCard() {
 .card-brush {
   position: absolute;
   left: 0;
-  top: d(50);
-  width: d(266);
-  height: d(16);
+  top: c(50);
+  width: c(266);
+  height: c(16);
 }
 .card-spark {
   position: absolute;
-  left: d(268);
-  top: d(-16);
-  width: d(46);
-  height: d(46);
+  left: c(268);
+  top: c(-16);
+  width: c(46);
+  height: c(46);
 }
 .card-stats {
   display: block;
-  font-size: d(22);
-  line-height: d(34);
+  font-size: c(22);
+  line-height: c(34);
   color: #2b4a40;
 }
 .card-text {
   display: block;
-  margin-top: d(10);
-  font-size: d(22.8);
-  line-height: d(35);
+  margin-top: c(10);
+  font-size: c(22.8);
+  line-height: c(35);
   color: #1c1b1c;
 }
 .card-tags {
   display: flex;
   flex-wrap: wrap;
-  margin-top: d(16);
+  margin-top: c(16);
 }
 .card-tag {
-  height: d(36);
-  margin: 0 d(12) d(8) 0;
-  padding: 0 d(16);
-  border-radius: d(18);
+  height: c(36);
+  margin: 0 c(12) c(8) 0;
+  padding: 0 c(16);
+  border-radius: c(18);
   background: #dcecd9;
-  font-size: d(20);
-  line-height: d(36);
+  font-size: c(20);
+  line-height: c(36);
   color: #24523b;
 }
 .card-foot {
   display: flex;
   align-items: center;
-  height: d(72);
-  margin-top: d(28);
+  height: c(72);
+  margin-top: c(28);
 }
 .card-hint {
   flex: 1;
-  font-size: d(20);
+  font-size: c(20);
   color: #2b4a40;
 }
 .card-qr {
-  width: d(72);
-  height: d(72);
+  width: c(72);
+  height: c(72);
 }
 
 .panel {
-  margin: d(28) d(75) 0;
-  padding: d(24) d(28) d(18) d(29);
+  margin: d(36) d(36) 0;
+  padding: d(30) d(30) d(18) d(32);
   border-radius: d(28);
   background: #fff;
   box-shadow: 0 d(2) d(12) rgba(90, 70, 40, 0.06);
 }
 .panel-title {
   display: block;
-  font-size: d(30);
-  line-height: d(38);
+  margin-bottom: d(8);
+  font-size: d(32);
+  line-height: d(40);
   font-weight: 600;
   color: #1c1b1c;
 }
 .opt {
   display: flex;
   align-items: center;
-  height: d(63);
+  height: d(84);
 }
 .opt-label {
   flex: 1;
-  font-size: d(28);
+  font-size: d(29);
   color: #1c1b1c;
 }
 .switch {
@@ -450,8 +455,8 @@ async function drawCard() {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: d(17);
-  font-size: d(22);
+  margin-top: d(24);
+  font-size: d(23);
   line-height: d(30);
   color: #7b7f82;
 }
@@ -463,16 +468,16 @@ async function drawCard() {
 
 .btns {
   display: flex;
-  margin-top: d(31);
-  padding: 0 d(27);
+  margin-top: d(36);
+  padding: 0 d(36);
 }
 .btn {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: d(71);
-  border-radius: d(36);
+  height: d(80);
+  border-radius: d(40);
   font-size: d(29);
   font-weight: 500;
 }

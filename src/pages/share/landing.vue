@@ -154,7 +154,7 @@ function start() {
   display: flex;
   align-items: center;
   height: d(72);
-  margin: d(8) 0 0 d(10);
+  margin: d(14) 0 0 d(10);
 }
 .author-avatar {
   width: d(70);
@@ -179,8 +179,8 @@ function start() {
 .cover {
   display: block;
   width: 100%;
-  height: d(205);
-  margin-top: d(18);
+  height: d(230);
+  margin-top: d(26);
   border-radius: d(26);
 }
 .title {
@@ -215,8 +215,8 @@ function start() {
 .stats {
   display: flex;
   align-items: center;
-  height: d(70);
-  margin-top: d(22);
+  height: d(80);
+  margin-top: d(28);
   border-radius: d(26);
   background: #fde9d6;
 }
@@ -252,7 +252,7 @@ function start() {
 }
 .quote {
   position: relative;
-  padding: d(26) d(26) d(26) d(70);
+  padding: d(32) d(26) d(32) d(70);
 }
 .quote-mark {
   position: absolute;
@@ -267,7 +267,7 @@ function start() {
 .quote-text {
   display: block;
   font-size: d(26);
-  line-height: d(37);
+  line-height: d(42);
   color: #1c1b1c;
 }
 .quote-tags {
@@ -287,8 +287,8 @@ function start() {
 }
 
 .pub {
-  margin-top: d(23);
-  padding: d(27) d(26) d(8) d(27);
+  margin-top: d(27);
+  padding: d(32) d(26) d(14) d(27);
 }
 .pub-title {
   display: block;
@@ -304,7 +304,7 @@ function start() {
 .pub-date {
   flex: none;
   width: d(140);
-  padding-top: d(16);
+  padding-top: d(24);
   font-size: d(25);
   line-height: d(36);
   color: #1c1b1c;
@@ -312,8 +312,8 @@ function start() {
 .pub-main {
   flex: 1;
   display: flex;
-  min-height: d(114);
-  padding: d(16) 0 d(17);
+  min-height: d(130);
+  padding: d(24) 0 d(25);
   box-sizing: border-box;
 }
 .pub-main.line {
@@ -342,7 +342,7 @@ function start() {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: d(20);
+  margin-top: d(28);
   font-size: d(23);
   line-height: d(32);
   color: #5a5e5d;
@@ -373,8 +373,8 @@ function start() {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: d(76);
-  margin-top: d(35);
+  height: d(84);
+  margin-top: d(40);
   border-radius: d(38);
   background: #f67f47;
   font-size: d(30);

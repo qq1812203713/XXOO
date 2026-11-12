@@ -150,7 +150,7 @@ function wipe() {
 }
 
 .wrap {
-  padding: d(47) d(24) d(10);
+  padding: d(40) d(24) d(24);
 }
 .me {
   position: relative;
@@ -235,7 +235,7 @@ function wipe() {
   display: flex;
   align-items: center;
   height: d(40);
-  margin-top: d(25);
+  margin-top: d(38);
   padding-left: d(24);
 }
 .sec-bar {
@@ -258,7 +258,7 @@ function wipe() {
   color: #7b7f82;
 }
 .card {
-  margin-top: d(10);
+  margin-top: d(14);
   border-radius: d(24);
   background: #fff;
   box-shadow: 0 d(2) d(12) rgba(90, 70, 40, 0.07);
@@ -267,7 +267,7 @@ function wipe() {
 .sync {
   display: flex;
   align-items: center;
-  height: d(70);
+  height: d(86);
   padding: 0 d(23) 0 d(22);
 }
 .sync-icon {
@@ -291,12 +291,12 @@ function wipe() {
 }
 
 .ai {
-  padding: d(4) d(23) d(17) d(24);
+  padding: d(6) d(23) d(24) d(24);
 }
 .field {
   display: flex;
   align-items: center;
-  height: d(59);
+  height: d(78);
   border-bottom: 1px solid #ece9e4;
 }
 .field.last {
@@ -323,17 +323,17 @@ function wipe() {
 .test {
   display: flex;
   align-items: center;
-  min-height: d(45);
-  margin-top: d(9);
+  min-height: d(52);
+  margin-top: d(14);
 }
 .test-btn {
   flex: none;
-  height: d(45);
-  padding: 0 d(24);
+  height: d(52);
+  padding: 0 d(26);
   border: 1px solid #f08a55;
   border-radius: d(23);
   font-size: d(25);
-  line-height: d(43);
+  line-height: d(50);
   color: #ea6f37;
 }
 .test-icon {
@@ -353,12 +353,12 @@ function wipe() {
 }
 
 .data {
-  padding: d(4) 0 d(5);
+  padding: d(8) 0;
 }
 .item {
   display: flex;
   align-items: center;
-  height: d(56);
+  height: d(76);
   padding: 0 d(19) 0 d(22);
 }
 .item-icon {
@@ -380,7 +380,7 @@ function wipe() {
 }
 .ver {
   display: block;
-  margin-top: d(13);
+  margin-top: d(28);
   text-align: center;
   font-size: d(21);
   line-height: d(30);
