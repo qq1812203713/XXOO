@@ -135,6 +135,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { compressPhoto } from '../../utils/image'
 import { themes, addRecord, loadDraft, saveDraft, clearDraft, emptyDraft, fullDate, hm } from '../../store'
 
 const MAX_PHOTOS = 9
@@ -234,37 +235,17 @@ function addTag() {
   })
 }
 
-// H5：把选中的照片压缩成 dataURL，刷新后仍能显示；小程序：存成本地文件
-function keepPhoto(path) {
-  return new Promise((resolve) => {
-    // #ifdef H5
-    const img = new Image()
-    img.onload = () => {
-      const k = Math.min(1, 900 / Math.max(img.width, img.height))
-      const c = document.createElement('canvas')
-      c.width = Math.round(img.width * k)
-      c.height = Math.round(img.height * k)
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
-      resolve(c.toDataURL('image/jpeg', 0.72))
-    }
-    img.onerror = () => resolve(path)
-    img.src = path
-    // #endif
-    // #ifndef H5
-    uni.saveFile({ tempFilePath: path, success: (r) => resolve(r.savedFilePath), fail: () => resolve(path) })
-    // #endif
-  })
-}
-
 function addPhoto() {
   uni.chooseImage({
     count: MAX_PHOTOS - form.images.length,
-    sizeType: ['compressed'],
+    sizeType: ['original'],
     success: async (res) => {
+      uni.showLoading({ title: '压缩照片…', mask: true })
       for (const p of res.tempFilePaths) {
-        const kept = await keepPhoto(p)
-        if (form.images.length < MAX_PHOTOS) form.images.push(kept)
+        const photo = await compressPhoto(p)
+        if (form.images.length < MAX_PHOTOS) form.images.push(photo.path)
       }
+      uni.hideLoading()
     },
   })
 }

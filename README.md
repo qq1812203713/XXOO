@@ -31,6 +31,7 @@ npm run build:mp-weixin
 | `src/pages/theme/theme.vue` | 主题详情页 |
 | `src/components/record-card.vue` | 首页的记录卡片 |
 | `src/pages/edit/edit.vue` | 记录编辑页（记一件事） |
+| `src/utils/image.js` | 照片压缩（H5 输出 WebP，小程序输出 JPEG，目标 80KB 以内） |
 | `src/store.js` | 主题与记录数据，记录保存在本地存储 |
 | `src/uni.scss` | 颜色变量与 `p()` 换算函数 |
 | `src/static/img` | 从设计稿切出的图片 |
