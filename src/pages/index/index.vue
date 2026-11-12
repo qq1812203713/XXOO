@@ -57,32 +57,9 @@
       </view>
     </view>
 
-    <!-- ================= 标签 ================= -->
-    <view v-else-if="tab === 1" class="sub-page">
-      <text class="sub-h">标签</text>
-      <view class="tag-cloud">
-        <view v-for="t in tagList" :key="t.name" class="tag-big"># {{ t.name }}<text class="tag-n">{{ t.count }}</text></view>
-      </view>
-      <view v-if="!tagList.length" class="empty">记录时加上标签，就会出现在这里</view>
-    </view>
-
-    <!-- ================= 回顾 ================= -->
-    <view v-else-if="tab === 2" class="sub-page">
-      <text class="sub-h">回顾</text>
-      <view class="records flush">
-        <record-card v-for="r in records" :key="r.id" :record="r" @remove="confirmRemove(r)" />
-      </view>
-    </view>
-
-    <!-- ================= 我的 ================= -->
-    <view v-else class="sub-page">
-      <text class="sub-h">我的</text>
-      <view class="stats">
-        <view class="stat"><text class="stat-n">{{ totalCount }}</text><text class="stat-l">条经历</text></view>
-        <view class="stat"><text class="stat-n">{{ themeList.length }}</text><text class="stat-l">个主题</text></view>
-        <view class="stat"><text class="stat-n">{{ tagList.length }}</text><text class="stat-l">个标签</text></view>
-      </view>
-    </view>
+    <tab-tags v-else-if="tab === 1" />
+    <tab-review v-else-if="tab === 2" />
+    <tab-mine v-else />
 
     <view class="tabbar-space" />
 
@@ -106,6 +83,9 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import RecordCard from '../../components/record-card.vue'
+import TabTags from '../../components/tab-tags.vue'
+import TabReview from '../../components/tab-review.vue'
+import TabMine from '../../components/tab-mine.vue'
 import { themes, records, ranges, inRange, themeCount, confirmRemove } from '../../store'
 
 const tabs = [
@@ -129,15 +109,7 @@ onLoad((q) => {
 })
 
 const themeList = computed(() => themes.value.map((t) => ({ ...t, count: themeCount(t) })))
-const totalCount = computed(() => themeList.value.reduce((n, t) => n + t.count, 0))
 const filtered = computed(() => records.value.filter((r) => inRange(r.time, range.value)))
-const tagList = computed(() => {
-  const m = {}
-  records.value.forEach((r) => (r.tags || []).forEach((t) => (m[t] = (m[t] || 0) + 1)))
-  return Object.keys(m)
-    .map((name) => ({ name, count: m[name] }))
-    .sort((a, b) => b.count - a.count)
-})
 
 function openEditor() {
   uni.navigateTo({ url: '/pages/edit/edit' })
@@ -388,70 +360,11 @@ function pickRange() {
   margin-top: p(11);
   padding: 0 p(34);
 }
-.records.flush {
-  margin-top: p(30);
-}
 .empty {
   padding: p(80) 0;
   text-align: center;
   font-size: p(26);
   color: #a6a39c;
-}
-
-/* ---------- 其它 tab ---------- */
-.sub-page {
-  padding-top: p(30);
-}
-.sub-h {
-  display: block;
-  padding: 0 p(45);
-  font-size: p(46);
-  line-height: p(60);
-  font-weight: 600;
-  color: $ink;
-}
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  padding: p(30) p(34) 0;
-}
-.tag-big {
-  margin: 0 p(16) p(16) 0;
-  padding: 0 p(24);
-  height: p(60);
-  line-height: p(60);
-  border-radius: p(30);
-  background: #dfeedd;
-  color: #2e6a4b;
-  font-size: p(28);
-}
-.tag-n {
-  margin-left: p(12);
-  opacity: 0.6;
-}
-.stats {
-  display: flex;
-  margin: p(30) p(34) 0;
-  padding: p(36) 0;
-  border-radius: p(22);
-  background: #fff;
-  box-shadow: 0 p(2) p(12) rgba(90, 70, 40, 0.07);
-}
-.stat {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.stat-n {
-  font-size: p(48);
-  font-weight: 600;
-  color: $ink;
-}
-.stat-l {
-  margin-top: p(6);
-  font-size: p(24);
-  color: $grey;
 }
 
 /* ---------- 底部导航 ---------- */

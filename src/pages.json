@@ -20,6 +20,27 @@
         "navigationStyle": "custom",
         "navigationBarTitleText": "记一件事"
       }
+    },
+    {
+      "path": "pages/theme-edit/theme-edit",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "编辑主题"
+      }
+    },
+    {
+      "path": "pages/share/preview",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "分享预览"
+      }
+    },
+    {
+      "path": "pages/share/landing",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "值了吗"
+      }
     }
   ],
   "globalStyle": {

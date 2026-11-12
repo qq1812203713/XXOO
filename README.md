@@ -45,3 +45,19 @@ npm run build:mp-weixin
 - 图标由 `node tools/gen_icons.mjs` 生成。
 - H5 下会画一条假的底部横条，方便和设计稿对比；小程序里使用系统真实的状态栏和安全区。
 - 设计稿里的假状态栏和右上角设置图标已按要求去掉。
+
+## 新增的六个页面
+
+设计稿在 `design/mock-*.png`。
+
+| 页面 | 位置 |
+| --- | --- |
+| 主题编辑页 | `src/pages/theme-edit/theme-edit.vue`（主题详情右上角铅笔进入；不带 `id` 打开即新建） |
+| 标签（底部第二个 tab） | `src/components/tab-tags.vue` |
+| 回顾（底部第三个 tab） | `src/components/tab-review.vue` |
+| 我的（底部第四个 tab） | `src/components/tab-mine.vue` |
+| 分享预览页 | `src/pages/share/preview.vue` |
+| 分享落地页 | `src/pages/share/landing.vue` |
+
+目前仍是本机数据：没有云端同步；分享内容只存在本机，别人的手机打不开；二维码是占位图；
+AI 回顾在“我的”里填了 OpenAI 兼容的服务地址、API Key、模型名称后才会真正调用，否则按记录做简单统计。

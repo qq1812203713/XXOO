@@ -2,19 +2,25 @@
 import { ref } from 'vue'
 
 const KEY = 'zlm_records_v1'
-const DESC_KEY = 'zlm_theme_desc_v1'
+const THEMES_KEY = 'zlm_themes_v2'
+const TAGS_KEY = 'zlm_tags_v1'
+const AI_KEY = 'zlm_ai_v1'
+const REVIEW_KEY = 'zlm_reviews_v1'
+const SHARE_KEY = 'zlm_shares_v1'
 const DAY = 86400000
 
-// base：示例数据之外的历史条数，用来凑出设计稿上的数量
+// 以下均为示例（模拟）数据。base / costBase / tagBase：示例记录之外的历史数量，用来凑出设计稿上的数字
 const themeSeed = [
   {
     id: 1,
     title: '带着相机去散步',
     cover: '/static/img/theme-1.jpg',
     coverWide: '/static/img/cover-1.jpg',
-    start: '2025年10月1日',
+    startAt: new Date(2025, 9, 1).getTime(),
     desc: '放慢一点，收集日常里容易错过的光。',
     hours: 6,
+    costBase: 126,
+    tagBase: { 小确幸: 4, 留给自己: 2, 第一次: 1 },
     tags: ['小确幸', '第一次', '留给自己'],
     base: 5,
   },
@@ -22,7 +28,7 @@ const themeSeed = [
     id: 2,
     title: '我的咖啡角落',
     cover: '/static/img/theme-2.jpg',
-    start: '2025年9月12日',
+    startAt: new Date(2025, 8, 12).getTime(),
     desc: '一杯咖啡的时间，留给自己发会儿呆。',
     hours: 4,
     base: 6,
@@ -31,7 +37,7 @@ const themeSeed = [
     id: 3,
     title: '学吉他的第30天',
     cover: '/static/img/theme-3.jpg',
-    start: '2025年9月27日',
+    startAt: new Date(2025, 8, 27).getTime(),
     desc: '手指还是会疼，但和弦慢慢顺了。',
     hours: 15,
     base: 12,
@@ -40,7 +46,7 @@ const themeSeed = [
     id: 4,
     title: '认真过周末',
     cover: '/static/img/theme-4.jpg',
-    start: '2025年8月2日',
+    startAt: new Date(2025, 7, 2).getTime(),
     desc: '不赶时间的两天，做点喜欢的事。',
     hours: 20,
     base: 10,
@@ -106,21 +112,61 @@ function persist() {
 /** 全部记录，按时间倒序。各页面共用同一份 */
 export const records = ref(load())
 
-function loadThemes() {
-  let desc = {}
+const read = (key) => {
   try {
-    desc = uni.getStorageSync(DESC_KEY) || {}
-  } catch (e) {}
-  return themeSeed.map((t) => ({ ...t, desc: desc[t.id] || t.desc }))
+    return uni.getStorageSync(key)
+  } catch (e) {
+    return ''
+  }
+}
+
+/* ---------- 主题 ---------- */
+export const DEFAULT_ITEMS = ['花费', '用时', '感受']
+
+function loadThemes() {
+  const saved = read(THEMES_KEY)
+  const list = Array.isArray(saved) && saved.length ? saved : themeSeed
+  return list.map((t) => ({ base: 0, hours: 0, items: [...DEFAULT_ITEMS], ...t }))
 }
 
 export const themes = ref(loadThemes())
 
-export function setThemeDesc(id, text) {
-  themes.value = themes.value.map((t) => (t.id === id ? { ...t, desc: text } : t))
-  const map = {}
-  themes.value.forEach((t) => (map[t.id] = t.desc))
-  uni.setStorageSync(DESC_KEY, map)
+const saveThemes = () => uni.setStorageSync(THEMES_KEY, themes.value)
+
+export function updateTheme(id, patch) {
+  themes.value = themes.value.map((t) => (t.id === id ? { ...t, ...patch } : t))
+  saveThemes()
+}
+
+export function addTheme(data) {
+  const id = themes.value.reduce((n, t) => Math.max(n, t.id), 0) + 1
+  themes.value = [...themes.value, { id, base: 0, hours: 0, startAt: Date.now(), items: [...DEFAULT_ITEMS], ...data }]
+  saveThemes()
+  return id
+}
+
+/** 删除主题及其下的全部记录 */
+export function removeTheme(id) {
+  themes.value = themes.value.filter((t) => t.id !== id)
+  records.value = records.value.filter((r) => r.themeId !== id)
+  saveThemes()
+  persist()
+}
+
+export function themeCost(t) {
+  const extra = records.value.filter((r) => r.themeId === t.id).reduce((n, r) => n + (Number(r.cost) || 0), 0)
+  return Math.round(((t.costBase || 0) + extra) * 100) / 100
+}
+
+/** 主题内各标签的使用次数，按次数从多到少 */
+export function themeTagCounts(t) {
+  const m = { ...(t.tagBase || {}) }
+  records.value
+    .filter((r) => r.themeId === t.id)
+    .forEach((r) => (r.tags || []).forEach((x) => (m[x] = (m[x] || 0) + 1)))
+  return Object.keys(m)
+    .map((name) => ({ name, count: m[name] }))
+    .sort((a, b) => b.count - a.count)
 }
 
 export function themeCount(t) {
@@ -224,6 +270,11 @@ export const monthDay = (ts) => {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
+export const ymdCn = (ts) => {
+  const d = new Date(ts)
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+}
+
 export const weekday = (ts) => WEEK[new Date(ts).getDay()]
 
 export const fullDate = (ts) => {
@@ -248,4 +299,271 @@ export function inRange(ts, index) {
   const day0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
   if (index === 1) return ts >= day0
   return ts >= day0 - (index === 2 ? 6 : 29) * DAY
+}
+
+/* ---------- 标签 ---------- */
+const tagSeed = [
+  { name: '小确幸', base: 11 },
+  { name: '留给自己', base: 7 },
+  { name: '第一次', base: 4 },
+  { name: '咖啡', base: 3 },
+  { name: '风景', base: 2 },
+  { name: '和朋友', base: 2 },
+  { name: '加班', base: 0, disabled: true },
+  { name: '冲动消费', base: 0, disabled: true },
+]
+
+function loadTags() {
+  const saved = read(TAGS_KEY)
+  return Array.isArray(saved) && saved.length ? saved : tagSeed
+}
+
+/** 标签登记表：名称、是否停用。记录里用到但没登记的标签会在 allTags 里自动补上 */
+export const tagMeta = ref(loadTags())
+const saveTags = () => uni.setStorageSync(TAGS_KEY, tagMeta.value)
+
+/** 全部标签及关联记录数，按数量从多到少 */
+export function allTags() {
+  const used = {}
+  records.value.forEach((r) => (r.tags || []).forEach((t) => (used[t] = (used[t] || 0) + 1)))
+  const known = tagMeta.value.map((t) => ({ name: t.name, disabled: !!t.disabled, count: (t.base || 0) + (used[t.name] || 0) }))
+  const extra = Object.keys(used)
+    .filter((n) => !tagMeta.value.some((t) => t.name === n))
+    .map((name) => ({ name, disabled: false, count: used[name] }))
+  return [...known, ...extra].sort((a, b) => b.count - a.count)
+}
+
+const cleanTag = (name) => String(name || '').replace(/[#\s]/g, '').slice(0, 6)
+
+/** 新建标签。返回错误提示，成功返回空串 */
+export function addTag(name) {
+  const n = cleanTag(name)
+  if (!n) return '请输入标签名'
+  if (allTags().some((t) => t.name === n)) return '这个标签已经有了'
+  tagMeta.value = [...tagMeta.value, { name: n, base: 0 }]
+  saveTags()
+  return ''
+}
+
+/** 重命名：同时更新所有记录、主题预设里的名字 */
+export function renameTag(from, to) {
+  const n = cleanTag(to)
+  if (!n) return '请输入标签名'
+  if (n === from) return ''
+  if (allTags().some((t) => t.name === n)) return '这个标签已经有了'
+  const swap = (list) => (list || []).map((t) => (t === from ? n : t))
+  const known = tagMeta.value.some((t) => t.name === from)
+  tagMeta.value = known ? tagMeta.value.map((t) => (t.name === from ? { ...t, name: n } : t)) : [...tagMeta.value, { name: n, base: 0 }]
+  records.value = records.value.map((r) => ({ ...r, tags: swap(r.tags) }))
+  themes.value = themes.value.map((t) => {
+    const next = { ...t, tags: t.tags && swap(t.tags) }
+    if (t.tagBase && from in t.tagBase) {
+      next.tagBase = { ...t.tagBase, [n]: t.tagBase[from] }
+      delete next.tagBase[from]
+    }
+    return next
+  })
+  saveTags()
+  saveThemes()
+  persist()
+  return ''
+}
+
+export function setTagDisabled(name, disabled) {
+  const known = tagMeta.value.some((t) => t.name === name)
+  tagMeta.value = known
+    ? tagMeta.value.map((t) => (t.name === name ? { ...t, disabled } : t))
+    : [...tagMeta.value, { name, base: 0, disabled }]
+  saveTags()
+}
+
+/* ---------- 个人资料（示例） ---------- */
+export const profile = { name: '小林', days: 26, avatar: '/static/img/avatar.jpg' }
+
+/* ---------- AI 配置与回顾 ---------- */
+// 注意：目前配置只保存在本机。接入云端后应改为服务端加密保存，并由云函数转发请求。
+export const aiConfig = ref({ base: '', key: '', model: '', ...(read(AI_KEY) || {}) })
+
+export function saveAiConfig(patch) {
+  aiConfig.value = { ...aiConfig.value, ...patch }
+  uni.setStorageSync(AI_KEY, aiConfig.value)
+}
+
+export const aiReady = () => !!(aiConfig.value.base && aiConfig.value.key && aiConfig.value.model)
+
+const aiUrl = (path) => aiConfig.value.base.replace(/\/+$/, '') + path
+
+function aiRequest(options) {
+  return new Promise((resolve, reject) => {
+    uni.request({
+      timeout: 60000,
+      ...options,
+      header: { Authorization: 'Bearer ' + aiConfig.value.key, 'Content-Type': 'application/json' },
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) return resolve(res.data)
+        const msg = res.data && res.data.error && (res.data.error.message || res.data.error)
+        if (res.statusCode === 401 || res.statusCode === 403) reject(new Error('密钥无效或没有权限'))
+        else if (res.statusCode === 404) reject(new Error(msg ? String(msg) : '地址或模型不存在'))
+        else reject(new Error(msg ? String(msg) : '服务返回错误 ' + res.statusCode))
+      },
+      fail: (e) => reject(new Error(/timeout/i.test(e.errMsg || '') ? '连接超时' : '无法连接到服务地址')),
+    })
+  })
+}
+
+/** 连接测试：请求模型列表 */
+export function testAi() {
+  if (!aiReady()) return Promise.reject(new Error('请先填写服务地址、API Key 和模型名称'))
+  return aiRequest({ url: aiUrl('/models'), method: 'GET' })
+}
+
+export const reviewRanges = [
+  { label: '最近7天', days: 7 },
+  { label: '最近30天', days: 30 },
+  { label: '最近90天', days: 90 },
+  { label: '全部时间', days: 0 },
+]
+
+export function recordsInRange(themeId, rangeIndex) {
+  const days = reviewRanges[rangeIndex].days
+  const from = days ? Date.now() - days * DAY : 0
+  return records.value.filter((r) => r.themeId === themeId && r.time >= from)
+}
+
+const yesterdayAt = (h, m) => {
+  const d = new Date(Date.now() - DAY)
+  d.setHours(h, m, 0, 0)
+  return d.getTime()
+}
+
+// 示例回顾，内容与设计稿一致
+const reviewSeed = () => ({
+  '1-1': {
+    text: '这个月你出门拍了 8 次，多数在傍晚的河边。记录里出现最多的词是“落日”和“慢下来”。你写到的收获，是重新注意到熟悉的城市。',
+    at: yesterdayAt(21, 4),
+    by: 'sample',
+  },
+})
+
+export const reviews = ref({ ...reviewSeed(), ...(read(REVIEW_KEY) || {}) })
+
+function saveReview(key, review) {
+  reviews.value = { ...reviews.value, [key]: review }
+  const mine = {}
+  Object.keys(reviews.value).forEach((k) => {
+    if (reviews.value[k].by !== 'sample') mine[k] = reviews.value[k]
+  })
+  uni.setStorageSync(REVIEW_KEY, mine)
+}
+
+export function setReviewText(key, text) {
+  const old = reviews.value[key]
+  if (old) saveReview(key, { ...old, text, edited: true })
+}
+
+// 没有配置 AI 时的本地统计式总结
+function localSummary(theme, list, rangeLabel) {
+  if (!list.length) return `${rangeLabel}里，「${theme.title}」还没有新的记录。`
+  const tags = {}
+  list.forEach((r) => (r.tags || []).forEach((t) => (tags[t] = (tags[t] || 0) + 1)))
+  const top = Object.keys(tags)
+    .sort((a, b) => tags[b] - tags[a])
+    .slice(0, 2)
+  const hours = list.reduce((n, r) => n + (Number(r.hours) || 0), 0)
+  const cost = list.reduce((n, r) => n + (Number(r.cost) || 0), 0)
+  let s = `${rangeLabel}里，你在「${theme.title}」记下了 ${list.length} 条经历。`
+  if (top.length) s += `用得最多的标签是${top.map((t) => `“${t}”`).join('和')}。`
+  if (hours) s += `一共花了约 ${hours} 小时。`
+  if (cost) s += `花费约 ${cost} 元。`
+  return s
+}
+
+/**
+ * 生成回顾。配置了 AI 就调用用户自己的接口，否则给出本地统计。
+ * 返回 { text, at, by: 'ai' | 'local' }，AI 调用失败时抛出带中文说明的错误。
+ */
+export async function generateReview(theme, rangeIndex) {
+  const key = `${theme.id}-${rangeIndex}`
+  const list = recordsInRange(theme.id, rangeIndex)
+  const label = reviewRanges[rangeIndex].label
+  let review
+  if (aiReady()) {
+    const lines = list
+      .slice(0, 60)
+      .map((r) => `- ${monthDay(r.time)} ${r.text.replace(/\n/g, '')}${r.tags && r.tags.length ? '（标签：' + r.tags.join('、') + '）' : ''}`)
+      .join('\n')
+    const data = await aiRequest({
+      url: aiUrl('/chat/completions'),
+      method: 'POST',
+      data: {
+        model: aiConfig.value.model,
+        messages: [
+          { role: 'system', content: '你是一个帮用户回顾生活记录的助手。只根据给出的记录，用第二人称、平实的中文写 2 到 3 句总结，不超过 90 个字，不编造记录里没有的内容。' },
+          { role: 'user', content: `主题：${theme.title}\n时间范围：${label}\n记录共 ${list.length} 条：\n${lines || '（没有记录）'}` },
+        ],
+      },
+    })
+    const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
+    if (!text) throw new Error('接口没有返回内容')
+    review = { text: String(text).trim(), at: Date.now(), by: 'ai', sources: list.map((r) => r.id) }
+  } else {
+    review = { text: localSummary(theme, list, label), at: Date.now(), by: 'local', sources: list.map((r) => r.id) }
+  }
+  saveReview(key, review)
+  return review
+}
+
+/* ---------- 分享快照 ---------- */
+// 目前快照只保存在本机，朋友的手机上读不到；接入云端后改为公开快照集合。
+export function createSnapshot(snap) {
+  const id = 's' + Date.now().toString(36)
+  const all = read(SHARE_KEY) || {}
+  all[id] = { ...snap, id, at: Date.now() }
+  uni.setStorageSync(SHARE_KEY, all)
+  return id
+}
+
+export function loadSnapshot(id) {
+  const all = read(SHARE_KEY) || {}
+  return all[id] || null
+}
+
+/** 按当前数据组一份分享内容 */
+export function buildSnapshot(themeId, opts, text) {
+  const t = themes.value.find((x) => x.id === themeId) || themes.value[0]
+  const list = records.value.filter((r) => r.themeId === t.id)
+  return {
+    opts,
+    author: profile.name,
+    days: profile.days,
+    avatar: profile.avatar,
+    title: t.title,
+    cover: t.coverWide || t.cover,
+    startAt: t.startAt,
+    count: themeCount(t),
+    hours: themeHours(t),
+    cost: themeCost(t),
+    text,
+    tags: themeTagCounts(t)
+      .slice(0, 2)
+      .map((x) => x.name),
+    records: list.slice(0, 3).map((r) => ({
+      time: r.time,
+      text: r.text.replace(/\n/g, ''),
+      image: r.image || r.imageWide || '',
+    })),
+  }
+}
+
+/* ---------- 导出与清空 ---------- */
+export function exportData() {
+  return JSON.stringify(
+    { exportedAt: new Date().toISOString(), themes: themes.value, tags: allTags(), records: records.value, reviews: reviews.value },
+    null,
+    2
+  )
+}
+
+export function wipeAll() {
+  uni.clearStorageSync()
 }

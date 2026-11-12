@@ -8,3 +8,8 @@ $ink: #1f302c;
 $text: #1c1b1c;
 $grey: #7b7f82;
 $orange: #f9844e;
+
+/* 其它设计稿宽度不同：dw(像素, 设计稿宽) */
+@function dw($px, $w) {
+  @return calc($px * 750 / $w) * 1rpx;
+}

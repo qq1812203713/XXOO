@@ -11,7 +11,7 @@
     <view class="nav" :style="navStyle">
       <view class="nav-back" @tap="back"><image class="nav-back-icon" src="/static/icons/back.svg" /></view>
       <text class="nav-title">主题详情</text>
-      <view class="nav-edit" :style="editStyle" @tap="editDesc">
+      <view class="nav-edit" :style="editStyle" @tap="editTheme">
         <image class="nav-edit-icon" src="/static/icons/pencil.svg" />
         <text>编辑</text>
       </view>
@@ -24,7 +24,7 @@
       <image class="title-brush" src="/static/img/title-brush.png" />
       <image class="title-spark" src="/static/img/title-spark.png" />
       <image class="start-icon" src="/static/icons/calendar.svg" />
-      <text class="start">开始于 {{ theme.start }}</text>
+      <text class="start">开始于 {{ ymdCn(theme.startAt) }}</text>
       <view class="desc-wrap">
         <text class="desc">{{ theme.desc }}</text>
         <view class="desc-line" />
@@ -105,7 +105,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { themes, records, themeCount, themeHours, setThemeDesc, confirmRemove, monthDay, weekday, hm } from '../../store'
+import { themes, records, themeCount, themeHours, ymdCn, confirmRemove, monthDay, weekday, hm } from '../../store'
 
 const themeId = ref(1)
 const tag = ref('')
@@ -132,7 +132,7 @@ onLoad((q) => {
   if (themes.value.some((t) => t.id === id)) themeId.value = id
 })
 
-const theme = computed(() => themes.value.find((t) => t.id === themeId.value))
+const theme = computed(() => themes.value.find((t) => t.id === themeId.value) || themes.value[0])
 const mine = computed(() => records.value.filter((r) => r.themeId === themeId.value))
 const count = computed(() => themeCount(theme.value))
 const hours = computed(() => themeHours(theme.value))
@@ -172,18 +172,8 @@ function review() {
   uni.reLaunch({ url: '/pages/index/index?tab=2' })
 }
 
-function editDesc() {
-  uni.showModal({
-    title: '修改主题简介',
-    editable: true,
-    content: theme.value.desc,
-    placeholderText: '一句话描述这个主题',
-    confirmColor: '#f9844e',
-    success: (res) => {
-      const text = (res.content || '').trim()
-      if (res.confirm && text) setThemeDesc(theme.value.id, text.slice(0, 30))
-    },
-  })
+function editTheme() {
+  uni.navigateTo({ url: '/pages/theme-edit/theme-edit?id=' + themeId.value })
 }
 </script>
 
