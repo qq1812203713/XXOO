@@ -90,7 +90,7 @@
     <view class="tabbar">
       <view class="tabs">
         <view v-for="(t, i) in tabs" :key="t.key" class="tab" @tap="tab = i">
-          <image class="tab-icon" :src="`/static/icons/tab-${t.key}${tab === i ? '-on' : ''}.svg`" />
+          <image class="tab-icon" :src="`/static/icons/tab-${t.key}${tab === i ? '-fill' : ''}.svg`" />
           <text class="tab-label" :class="{ on: tab === i }">{{ t.label }}</text>
         </view>
       </view>

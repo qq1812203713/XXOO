@@ -26,5 +26,5 @@ out('chevron-down', svg(shapes['chevron-down'], GREY, 2))
 out('check', svg(shapes.check, GREY, 1.7))
 for (const n of ['home', 'tag', 'clock', 'user']) {
   out(`tab-${n}`, svg(shapes[n], GREY, 1.8))
-  out(`tab-${n}-on`, svg(n === 'home' ? homeFill : filled[n], ORANGE, 1.8, ORANGE))
+  out(`tab-${n}-fill`, svg(n === 'home' ? homeFill : filled[n], ORANGE, 1.8, ORANGE))
 }
