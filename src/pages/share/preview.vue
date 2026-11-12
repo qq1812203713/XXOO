@@ -70,7 +70,7 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
+import { onLoad } from '@dcloudio/uni-app'
 import { themes, reviews, buildSnapshot, createSnapshot } from '../../store'
 
 // 示例回顾对应的分享文案（设计稿里的第一人称短句）
@@ -85,7 +85,6 @@ const options = [
 const opts = reactive({ cover: true, text: true, cost: false, photos: true })
 const themeId = ref(themes.value[0].id)
 const text = ref('')
-const sharedId = ref('')
 
 const statusBarHeight = ref(20)
 // #ifndef H5
@@ -126,11 +125,6 @@ function editText() {
   })
 }
 
-function publish() {
-  sharedId.value = createSnapshot(snap.value)
-  return sharedId.value
-}
-
 function share() {
   if (!opts.text && !opts.cover && !opts.photos) {
     uni.showToast({ title: '至少公开一项内容', icon: 'none' })
@@ -141,21 +135,21 @@ function share() {
     content: '将按上面的开关生成一份公开内容，朋友打开后只能看到这些。',
     confirmText: '确认',
     confirmColor: '#f9844e',
-    success: (res) => {
+    success: async (res) => {
       if (!res.confirm) return
-      const id = publish()
-      uni.navigateTo({ url: '/pages/share/landing?id=' + id })
+      uni.showLoading({ title: '生成中…', mask: true })
+      try {
+        const id = await createSnapshot(snap.value)
+        uni.hideLoading()
+        // 落地页右上角可以转发给朋友（小程序），也可以撤回
+        uni.navigateTo({ url: '/pages/share/landing?id=' + id + '&mine=1' })
+      } catch (e) {
+        uni.hideLoading()
+        uni.showToast({ title: e.message || '生成失败，请稍后再试', icon: 'none' })
+      }
     },
   })
 }
-
-// #ifdef MP
-onShareAppMessage(() => ({
-  title: opts.cover ? snap.value.title : '我在「值了吗」记了一件事',
-  path: '/pages/share/landing?id=' + (sharedId.value || publish()),
-  imageUrl: opts.cover ? snap.value.cover : '',
-}))
-// #endif
 
 function saveImage() {
   // #ifdef H5

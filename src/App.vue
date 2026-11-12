@@ -1,5 +1,15 @@
 <script>
-export default {}
+import { startSync, syncNow } from './sync'
+
+export default {
+  onLaunch() {
+    startSync()
+  },
+  onShow() {
+    // 回到前台时再拉一次，拿到其它设备上的改动
+    syncNow()
+  },
+}
 </script>
 
 <style lang="scss">

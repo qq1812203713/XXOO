@@ -16,11 +16,11 @@
     </view>
 
     <view class="sec"><view class="sec-bar" /><text class="sec-title">同步</text></view>
-    <view class="card sync">
+    <view class="card sync" @tap="retry">
       <image class="sync-icon" src="/static/icons/cloud.svg" />
       <text class="sync-label">云端同步</text>
-      <text class="sync-state">尚未接入</text>
-      <text class="sync-time">仅存本机</text>
+      <text class="sync-state" :class="sync.cls">{{ sync.text }}</text>
+      <text class="sync-time">{{ sync.side }}</text>
     </view>
 
     <view class="sec"><view class="sec-bar" /><text class="sec-title">AI 配置</text><text class="sec-opt">（选填）</text></view>
@@ -71,13 +71,40 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import { syncState } from '../api'
+import { syncNow } from '../sync'
 import { profile, themes, themeCount, allTags, aiConfig, saveAiConfig, testAi, exportData, wipeAll } from '../store'
 
 const ai = aiConfig
 const showKey = ref(false)
 const testing = ref(false)
 const result = ref(null)
+
+// 每 20 秒刷新一次“刚刚 / N 分钟前”
+const now = ref(Date.now())
+const tick = setInterval(() => (now.value = Date.now()), 20000)
+onBeforeUnmount(() => clearInterval(tick))
+
+const ago = (ts) => {
+  const min = Math.floor((now.value - ts) / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return min + ' 分钟前'
+  return Math.floor(min / 60) + ' 小时前'
+}
+const sync = computed(() => {
+  const s = syncState.value
+  if (s.status === 'ok') return { text: '已全部同步', side: ago(s.at), cls: 'ok' }
+  if (s.status === 'syncing') return { text: '同步中…', side: '', cls: '' }
+  if (s.status === 'error') return { text: '同步失败', side: '点这里重试', cls: 'bad' }
+  return { text: '尚未接入', side: '仅存本机', cls: '' }
+})
+
+function retry() {
+  if (syncState.value.status !== 'error') return
+  if (syncState.value.message) uni.showToast({ title: syncState.value.message, icon: 'none' })
+  syncNow()
+}
 
 const recordCount = computed(() => themes.value.reduce((n, t) => n + themeCount(t), 0))
 const tagCount = computed(() => allTags().length)
@@ -116,7 +143,7 @@ function doExport() {
 function privacy() {
   uni.showModal({
     title: '隐私说明',
-    content: '目前所有记录、照片和 AI 配置都只保存在这台设备上，不会上传。使用 AI 回顾时，所选主题的记录文字会发送到你自己填写的服务地址。',
+    content: syncState.value.status === 'off' ? '目前所有记录、照片和 AI 配置都只保存在这台设备上，不会上传。使用 AI 回顾时，所选主题的记录文字会发送到你自己填写的服务地址。' : '你的记录和照片会同步到云端，只有你自己能看到；只有你确认公开的分享内容，别人才能凭链接查看。AI 的 API Key 只保存在这台设备上，使用 AI 回顾时，它和所选主题的记录文字会经由服务器转发到你填写的服务地址，服务器不保存。',
     showCancel: false,
     confirmText: '知道了',
     confirmColor: '#f9844e',
@@ -126,12 +153,17 @@ function privacy() {
 function wipe() {
   uni.showModal({
     title: '删除全部数据？',
-    content: '你写的记录、主题、标签和 AI 配置都会被清空，恢复成初始的示例内容，无法撤销。',
+    content: '你写的记录、主题、标签、AI 配置和已发出的分享都会被删除（包括云端），恢复成初始的示例内容，无法撤销。',
     confirmText: '全部删除',
     confirmColor: '#e0502f',
-    success: (res) => {
+    success: async (res) => {
       if (!res.confirm) return
-      wipeAll()
+      try {
+        await wipeAll()
+      } catch (e) {
+        uni.showToast({ title: '云端数据删除失败，请联网后再试', icon: 'none' })
+        return
+      }
       // #ifdef H5
       location.reload()
       // #endif
@@ -284,6 +316,12 @@ function wipe() {
   flex: 1;
   font-size: d(25);
   color: #b0763f;
+}
+.sync-state.ok {
+  color: #2e8b47;
+}
+.sync-state.bad {
+  color: #e0502f;
 }
 .sync-time {
   font-size: d(25);

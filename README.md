@@ -59,5 +59,18 @@ npm run build:mp-weixin
 | 分享预览页 | `src/pages/share/preview.vue` |
 | 分享落地页 | `src/pages/share/landing.vue` |
 
-目前仍是本机数据：没有云端同步；分享内容只存在本机，别人的手机打不开；二维码是占位图；
+连上后端后记录会同步到云端，分享也能被别人打开；没有后端时退回只用本机数据。二维码仍是占位图；
 AI 回顾在“我的”里填了 OpenAI 兼容的服务地址、API Key、模型名称后才会真正调用，否则按记录做简单统计。
+
+## 后端与云端同步
+
+后端代码在 `server/`，说明和部署步骤见 `server/README.md`。
+
+| 文件 | 作用 |
+| --- | --- |
+| `src/config.js` | 后端连接配置（云托管环境 ID、服务名称） |
+| `src/api.js` | 发请求、传图片；H5 走普通 HTTP，小程序走 `wx.cloud.callContainer` |
+| `src/sync.js` | 同步逻辑：本机改动自动推到后端，启动和回到前台时拉取 |
+
+本地一起跑：`npm run build:h5 && npm run server`，打开 http://localhost:5173 。
+

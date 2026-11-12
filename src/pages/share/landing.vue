@@ -12,7 +12,8 @@
       <text class="from">来自朋友的分享</text>
     </view>
 
-    <view v-if="!snap" class="gone">
+    <view v-if="loading" class="gone"><text class="gone-text">加载中…</text></view>
+    <view v-else-if="!snap" class="gone">
       <text class="gone-title">这份分享看不到了</text>
       <text class="gone-text">它可能已被对方撤回，或者还没有同步到云端。</text>
     </view>
@@ -74,9 +75,19 @@
         <image class="note-icon" src="/static/icons/lock.svg" />
         <text>仅展示对方选择公开的内容</text>
       </view>
+
+      <view v-if="mine" class="mine">
+        <!-- #ifdef MP -->
+        <button class="mine-btn mine-send" open-type="share">转发给朋友</button>
+        <!-- #endif -->
+        <!-- #ifdef H5 -->
+        <view class="mine-btn mine-send" @tap="copyLink">复制链接</view>
+        <!-- #endif -->
+        <view class="mine-btn mine-revoke" @tap="revoke">撤回这份分享</view>
+      </view>
     </template>
 
-    <view class="cta" @tap="start">
+    <view v-if="!mine" class="cta" @tap="start">
       <image class="cta-icon" src="/static/icons/tabs-plus.svg" />
       <text>我也记一件</text>
     </view>
@@ -93,8 +104,8 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
-import { loadSnapshot, buildSnapshot, themes, monthDay, ymdCn } from '../../store'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
+import { loadSnapshot, revokeSnapshot, isMyShare, buildSnapshot, themes, monthDay, ymdCn } from '../../store'
 
 const SAMPLE_SHARE_TEXT = '这个月我出门拍了 8 次，多数在傍晚的河边。重新注意到了熟悉的城市。'
 
@@ -104,11 +115,61 @@ const statusBarHeight = ref(20)
 statusBarHeight.value = uni.getSystemInfoSync().statusBarHeight || 20
 // #endif
 
-onLoad((q) => {
-  if (q && q.id) snap.value = loadSnapshot(q.id)
-  // 不带 id 打开时展示一份示例，方便预览页面样式
-  else snap.value = buildSnapshot(themes.value[0].id, { cover: true, text: true, cost: false, photos: true }, SAMPLE_SHARE_TEXT)
+const loading = ref(false)
+const shareId = ref('')
+// 自己刚发出的分享：显示转发和撤回，不显示“我也记一件”
+const mine = ref(false)
+
+onLoad(async (q) => {
+  if (!q || !q.id) {
+    // 不带 id 打开时展示一份示例，方便预览页面样式
+    snap.value = buildSnapshot(themes.value[0].id, { cover: true, text: true, cost: false, photos: true }, SAMPLE_SHARE_TEXT)
+    return
+  }
+  shareId.value = q.id
+  loading.value = true
+  try {
+    snap.value = await loadSnapshot(q.id)
+  } catch (e) {
+    uni.showToast({ title: e.message || '加载失败', icon: 'none' })
+  }
+  loading.value = false
+  mine.value = !!snap.value && q.mine === '1' && isMyShare(q.id)
 })
+
+// #ifdef MP
+onShareAppMessage(() => ({
+  title: snap.value && snap.value.opts.cover ? snap.value.title : '我在「值了吗」记了一件事',
+  path: '/pages/share/landing?id=' + shareId.value,
+}))
+// #endif
+
+function copyLink() {
+  // #ifdef H5
+  const url = location.origin + location.pathname + '#/pages/share/landing?id=' + shareId.value
+  uni.setClipboardData({ data: url, success: () => uni.showToast({ title: '链接已复制', icon: 'none' }) })
+  // #endif
+}
+
+function revoke() {
+  uni.showModal({
+    title: '撤回这份分享？',
+    content: '撤回后，朋友再打开就看不到了。',
+    confirmText: '撤回',
+    confirmColor: '#e0502f',
+    success: async (res) => {
+      if (!res.confirm) return
+      try {
+        await revokeSnapshot(shareId.value)
+        uni.showToast({ title: '已撤回', icon: 'none' })
+        snap.value = null
+        mine.value = false
+      } catch (e) {
+        uni.showToast({ title: e.message || '撤回失败', icon: 'none' })
+      }
+    },
+  })
+}
 
 const list = computed(() => (snap.value ? snap.value.records.slice(0, 2) : []))
 
@@ -351,6 +412,35 @@ function start() {
   width: d(28);
   height: d(28);
   margin-right: d(8);
+}
+.mine {
+  display: flex;
+  margin-top: d(36);
+}
+.mine-btn {
+  flex: 1;
+  height: d(80);
+  margin: 0;
+  padding: 0;
+  border-radius: d(40);
+  text-align: center;
+  font-size: d(28);
+  line-height: d(80);
+  font-weight: 500;
+}
+.mine-btn::after {
+  border: 0;
+}
+.mine-send {
+  margin-right: d(20);
+  background: #f67f47;
+  color: #fff;
+}
+.mine-revoke {
+  border: 1px solid #d9d5ce;
+  background: #fff;
+  line-height: d(78);
+  color: #e0502f;
 }
 .gone {
   padding: d(160) 0 d(120);

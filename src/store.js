@@ -1,5 +1,6 @@
 // 数据层：主题与记录。记录保存在本地存储，后续可替换为云端接口。
 import { ref } from 'vue'
+import { api, backendEnabled } from './api'
 
 const KEY = 'zlm_records_v1'
 const THEMES_KEY = 'zlm_themes_v2'
@@ -7,6 +8,7 @@ const TAGS_KEY = 'zlm_tags_v1'
 const AI_KEY = 'zlm_ai_v1'
 const REVIEW_KEY = 'zlm_reviews_v1'
 const SHARE_KEY = 'zlm_shares_v1'
+const CLOUD_KEY = 'zlm_cloud_v1'
 const DAY = 86400000
 
 // 以下均为示例（模拟）数据。base / costBase / tagBase：示例记录之外的历史数量，用来凑出设计稿上的数字
@@ -95,18 +97,34 @@ const seed = () => [
 ]
 
 const isSeed = (r) => String(r.id).startsWith('seed-')
+export const isSeedRecord = isSeed
+
+const readFlag = (key) => {
+  try {
+    return uni.getStorageSync(key)
+  } catch (e) {
+    return ''
+  }
+}
+/** 是否已经和云端建立同步。建立后本机数据完全以云端为准，示例记录也成为普通记录 */
+export const isCloud = () => !!readFlag(CLOUD_KEY)
+export const setCloud = () => {
+  uni.setStorageSync(CLOUD_KEY, 1)
+  persist()
+}
 
 function load() {
   let saved = []
   try {
     saved = uni.getStorageSync(KEY)
   } catch (e) {}
+  if (isCloud()) return (Array.isArray(saved) ? saved : []).sort((a, b) => b.time - a.time)
   // 示例记录每次按当天重新生成，只持久化用户自己写的
   return [...(Array.isArray(saved) ? saved : []), ...seed()].sort((a, b) => b.time - a.time)
 }
 
 function persist() {
-  uni.setStorageSync(KEY, records.value.filter((r) => !isSeed(r)))
+  uni.setStorageSync(KEY, isCloud() ? records.value : records.value.filter((r) => !isSeed(r)))
 }
 
 /** 全部记录，按时间倒序。各页面共用同一份 */
@@ -393,7 +411,7 @@ export const aiReady = () => !!(aiConfig.value.base && aiConfig.value.key && aiC
 
 const aiUrl = (path) => aiConfig.value.base.replace(/\/+$/, '') + path
 
-function aiRequest(options) {
+function aiDirect(options) {
   return new Promise((resolve, reject) => {
     uni.request({
       timeout: 60000,
@@ -414,7 +432,28 @@ function aiRequest(options) {
 /** 连接测试：请求模型列表 */
 export function testAi() {
   if (!aiReady()) return Promise.reject(new Error('请先填写服务地址、API Key 和模型名称'))
-  return aiRequest({ url: aiUrl('/models'), method: 'GET' })
+  return aiCall({ test: true })
+}
+
+/**
+ * 调用 AI。有后端时由后端转发（小程序不能直接请求任意域名），否则从本机直接请求。
+ * 返回 { text }；test 为 true 时只检查能否连通。
+ */
+async function aiCall({ messages, test }) {
+  const { base, key, model } = aiConfig.value
+  if (backendEnabled) {
+    try {
+      return await api('POST', '/api/ai', { base, key, model, messages, test })
+    } catch (e) {
+      // 页面是纯静态托管、没有后端时退回直连
+      if (e.status !== 404) throw e
+    }
+  }
+  if (test) return aiDirect({ url: aiUrl('/models'), method: 'GET' })
+  const data = await aiDirect({ url: aiUrl('/chat/completions'), method: 'POST', data: { model, messages } })
+  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
+  if (!text) throw new Error('接口没有返回内容')
+  return { text: String(text).trim() }
 }
 
 export const reviewRanges = [
@@ -492,20 +531,13 @@ export async function generateReview(theme, rangeIndex) {
       .slice(0, 60)
       .map((r) => `- ${monthDay(r.time)} ${r.text.replace(/\n/g, '')}${r.tags && r.tags.length ? '（标签：' + r.tags.join('、') + '）' : ''}`)
       .join('\n')
-    const data = await aiRequest({
-      url: aiUrl('/chat/completions'),
-      method: 'POST',
-      data: {
-        model: aiConfig.value.model,
-        messages: [
-          { role: 'system', content: '你是一个帮用户回顾生活记录的助手。只根据给出的记录，用第二人称、平实的中文写 2 到 3 句总结，不超过 90 个字，不编造记录里没有的内容。' },
-          { role: 'user', content: `主题：${theme.title}\n时间范围：${label}\n记录共 ${list.length} 条：\n${lines || '（没有记录）'}` },
-        ],
-      },
+    const { text } = await aiCall({
+      messages: [
+        { role: 'system', content: '你是一个帮用户回顾生活记录的助手。只根据给出的记录，用第二人称、平实的中文写 2 到 3 句总结，不超过 90 个字，不编造记录里没有的内容。' },
+        { role: 'user', content: `主题：${theme.title}\n时间范围：${label}\n记录共 ${list.length} 条：\n${lines || '（没有记录）'}` },
+      ],
     })
-    const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
-    if (!text) throw new Error('接口没有返回内容')
-    review = { text: String(text).trim(), at: Date.now(), by: 'ai', sources: list.map((r) => r.id) }
+    review = { text, at: Date.now(), by: 'ai', sources: list.map((r) => r.id) }
   } else {
     review = { text: localSummary(theme, list, label), at: Date.now(), by: 'local', sources: list.map((r) => r.id) }
   }
@@ -514,18 +546,57 @@ export async function generateReview(theme, rangeIndex) {
 }
 
 /* ---------- 分享快照 ---------- */
-// 目前快照只保存在本机，朋友的手机上读不到；接入云端后改为公开快照集合。
-export function createSnapshot(snap) {
-  const id = 's' + Date.now().toString(36)
-  const all = read(SHARE_KEY) || {}
+// 有后端时快照存在后端，别人凭编号可以打开；没有后端时只存在本机。
+const localShares = () => read(SHARE_KEY) || {}
+const MY_SHARES_KEY = 'zlm_my_shares_v1'
+const myShares = () => {
+  const v = read(MY_SHARES_KEY)
+  return Array.isArray(v) ? v : []
+}
+
+/** 这份分享是不是在这台设备上发出的（是的话可以撤回） */
+export const isMyShare = (id) => !!localShares()[id] || myShares().includes(id)
+
+/** 撤回分享：之后别人再打开就看不到了 */
+export async function revokeSnapshot(id) {
+  const all = localShares()
+  if (all[id]) {
+    delete all[id]
+    uni.setStorageSync(SHARE_KEY, all)
+    return
+  }
+  await api('DELETE', '/api/shares/' + encodeURIComponent(id))
+  uni.setStorageSync(MY_SHARES_KEY, myShares().filter((x) => x !== id))
+}
+
+export async function createSnapshot(snap) {
+  if (backendEnabled) {
+    try {
+      const res = await api('POST', '/api/shares', { snapshot: snap })
+      uni.setStorageSync(MY_SHARES_KEY, [...myShares(), res.id])
+      return res.id
+    } catch (e) {
+      if (e.status !== 404) throw e
+    }
+  }
+  const id = 'local-' + Date.now().toString(36)
+  const all = localShares()
   all[id] = { ...snap, id, at: Date.now() }
   uni.setStorageSync(SHARE_KEY, all)
   return id
 }
 
-export function loadSnapshot(id) {
-  const all = read(SHARE_KEY) || {}
-  return all[id] || null
+/** 读取分享内容；不存在或已撤回时返回 null */
+export async function loadSnapshot(id) {
+  const local = localShares()[id]
+  if (local) return local
+  if (!backendEnabled) return null
+  try {
+    return await api('GET', '/api/shares/' + encodeURIComponent(id))
+  } catch (e) {
+    if (e.status === 404) return null
+    throw e
+  }
 }
 
 /** 按当前数据组一份分享内容 */
@@ -564,6 +635,27 @@ export function exportData() {
   )
 }
 
-export function wipeAll() {
+/** 清空本机数据；有后端时连同云端的记录和分享一起删除 */
+export async function wipeAll() {
+  if (backendEnabled && isCloud()) await api('DELETE', '/api/account')
   uni.clearStorageSync()
+  // 小程序里重新打开首页不会重置内存中的数据，这里手动恢复成初始示例
+  themes.value = loadThemes()
+  records.value = load()
+  tagMeta.value = loadTags()
+  reviews.value = reviewSeed()
+  aiConfig.value = { base: '', key: '', model: '' }
+}
+
+/** 用云端数据覆盖本机（由 sync.js 调用） */
+export function applyCloud(data) {
+  uni.setStorageSync(CLOUD_KEY, 1)
+  if (data.themes.length) themes.value = data.themes.map((t) => ({ base: 0, hours: 0, items: [...DEFAULT_ITEMS], ...t })).sort((a, b) => a.id - b.id)
+  records.value = [...data.records].sort((a, b) => b.time - a.time)
+  if (data.tags.length) tagMeta.value = data.tags
+  reviews.value = { ...reviewSeed(), ...data.reviews }
+  saveThemes()
+  persist()
+  saveTags()
+  uni.setStorageSync(REVIEW_KEY, data.reviews)
 }

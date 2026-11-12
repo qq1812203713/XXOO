@@ -1,0 +1,14 @@
+{
+  "name": "zhilema-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "optionalDependencies": {
+    "mysql2": "^3.11.0"
+  }
+}

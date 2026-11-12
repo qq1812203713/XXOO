@@ -19,3 +19,5 @@ dist
 *.njsproj
 *.sln
 *.sw?
+# 后端本地数据
+server/data
