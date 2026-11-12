@@ -12,6 +12,9 @@ npm install
 # H5 预览（浏览器打开 http://localhost:5173）
 npm run dev:h5
 
+# H5 正式构建并本地托管（在线预览用这个，加载更快更稳）
+npm run preview:h5
+
 # 微信小程序：编译后用「微信开发者工具」导入 dist/dev/mp-weixin
 npm run dev:mp-weixin
 # 发布用的构建，输出到 dist/build/mp-weixin
