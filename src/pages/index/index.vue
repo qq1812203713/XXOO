@@ -1,8 +1,8 @@
 <template>
   <view class="page">
-    <!-- 状态栏：小程序用真实状态栏高度；H5 预览画一条与设计稿一致的假状态栏 -->
+    <!-- 顶部留白：小程序为系统状态栏高度，H5 为固定间距 -->
     <!-- #ifdef H5 -->
-    <image class="statusbar" src="/static/img/statusbar.png" />
+    <view class="top-gap" />
     <!-- #endif -->
     <!-- #ifndef H5 -->
     <view :style="{ height: statusBarHeight + 'px' }" />
@@ -12,9 +12,6 @@
     <view v-if="tab === 0">
       <view class="hero">
         <image class="logo" src="/static/img/logo.png" />
-        <view class="gear" :style="gearStyle" @tap="tab = 3">
-          <image class="gear-icon" src="/static/icons/gear.svg" />
-        </view>
         <text class="h1">把生活，记成自己的答案。</text>
         <text class="h2">今天，也有一些值得记住的小事。</text>
         <image class="brush" src="/static/img/brush.png" />
@@ -136,21 +133,10 @@ const records = ref(loadRecords())
 const editor = reactive({ show: false, text: '', themeId: 1, tags: '' })
 
 const statusBarHeight = ref(20)
-const gearStyle = ref('')
 // #ifndef H5
 const sys = uni.getSystemInfoSync()
 statusBarHeight.value = sys.statusBarHeight || 20
 // #endif
-// #ifdef MP
-// 小程序右上角有胶囊按钮，设置图标挪到胶囊左侧并与其垂直对齐
-const cap = uni.getMenuButtonBoundingClientRect()
-if (cap && cap.width) {
-  const size = (sys.windowWidth * 64) / 852
-  const top = cap.top + cap.height / 2 - statusBarHeight.value - size / 2
-  gearStyle.value = `left:auto;right:${sys.windowWidth - cap.left + 10}px;top:${top}px;`
-}
-// #endif
-
 const themeList = computed(() =>
   themes.map((t) => ({ ...t, count: t.base + records.value.filter((r) => r.themeId === t.id).length }))
 )
@@ -209,10 +195,8 @@ function pickRange() {
   margin: 0 auto;
   background: $bg;
 }
-.statusbar {
-  display: block;
-  width: p(852);
-  height: p(84);
+.top-gap {
+  height: p(28);
 }
 
 /* ---------- 顶部 ---------- */
@@ -226,18 +210,6 @@ function pickRange() {
   top: 0;
   width: p(212);
   height: p(94);
-}
-.gear {
-  position: absolute;
-  left: p(757);
-  top: p(30);
-  width: p(64);
-  height: p(64);
-}
-.gear-icon {
-  display: block;
-  width: 100%;
-  height: 100%;
 }
 .h1 {
   position: absolute;

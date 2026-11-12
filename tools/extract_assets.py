@@ -26,7 +26,6 @@ photo('theme-2.jpg', (443, 676, 817, 868))
 photo('theme-3.jpg', (42, 1013, 415, 1205))
 photo('theme-4.jpg', (443, 1013, 817, 1205))
 photo('record-1.jpg', (55, 1435, 321, 1657))
-photo('statusbar.png', (0, 0, 852, 84))
 
 keyed('logo.png', (40, 84, 252, 178))
 keyed('brush.png', (40, 338, 410, 364), lo=2, hi=11)
