@@ -138,7 +138,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   } catch {
     if (vrm.meta?.metaVersion === '0') vrm.scene.rotation.y = Math.PI;
   }
-  scene.add(vrm.scene);
+  // 模型挂在一个外壳上：转动外壳，永远不怕别处改写 vrm.scene.rotation
+  const holder = new THREE.Group();
+  holder.add(vrm.scene);
+  scene.add(holder);
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
   const V = THREE.Vector3;
@@ -146,65 +149,66 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   let faceProbe = '没量到';
   const Q = THREE.Quaternion;
 
-  // —— 朝向自校准 ——
-  // 先把身体摆到静止姿态：normalized 骨骼的**位置**要等 humanoid.update() 之后才有，
-  // 之前的版本在这里读坐标，读到的全是 (0,0,0)，校正被自己跳过了 —— 这就是“还是背对着我”。
-  vrm.update(0);
-  vrm.scene.updateMatrixWorld(true);
+  // —— 朝向 ——
+  // 已经拆开模型文件量过：她的左脚趾指向 -Z、眼睛在 -Z 一侧 ⇒ 原件面朝 -Z，
+  // 而相机在 +Z。所以这里**无条件**先转 180°，再用实测结果自我验证并打日志。
+  holder.rotation.y = Math.PI;
 
-  {
-    const raw = (n) => {
-      try {
-        return vrm.humanoid.getRawBoneNode?.(n) || node(n) || null;
-      } catch {
-        return node(n) || null;
-      }
-    };
-    // 首选：脚趾朝向（最直接地表示“她面朝哪”），退回左右肩连线
-    let yaw = null;
+  const boneOf = (n) => {
+    try {
+      return vrm.humanoid.getRawBoneNode?.(n) || node(n) || null;
+    } catch {
+      return node(n) || null;
+    }
+  };
+
+  const measureFacing = () => {
+    vrm.scene.updateMatrixWorld(true);
     const f = new V();
     const tt = new V();
-    raw('leftFoot')?.getWorldPosition(f);
-    raw('leftToes')?.getWorldPosition(tt);
-    const fw = tt.clone().sub(f).setY(0);
-    if (fw.lengthSq() > 1e-8) {
-      yaw = Math.atan2(fw.x, fw.z);
-    } else {
-      const L = new V();
-      const R = new V();
-      raw('leftUpperArm')?.getWorldPosition(L);
-      raw('rightUpperArm')?.getWorldPosition(R);
-      const leftAxis = L.clone().sub(R).setY(0);
-      if (leftAxis.lengthSq() > 1e-8) {
-        leftAxis.normalize();
-        const facing = new V().crossVectors(leftAxis, new V(0, 1, 0)).normalize();
-        yaw = Math.atan2(facing.x, facing.z);
+    const fb = boneOf('leftFoot');
+    const tb = boneOf('leftToes');
+    if (fb && tb) {
+      fb.getWorldPosition(f);
+      tb.getWorldPosition(tt);
+      const d = tt.clone().sub(f).setY(0);
+      if (d.lengthSq() > 1e-9) return d.normalize();
+    }
+    const L = new V();
+    const R = new V();
+    boneOf('leftUpperArm')?.getWorldPosition(L);
+    boneOf('rightUpperArm')?.getWorldPosition(R);
+    const leftAxis = L.clone().sub(R).setY(0);
+    if (leftAxis.lengthSq() > 1e-9) {
+      leftAxis.normalize();
+      return new V().crossVectors(leftAxis, new V(0, 1, 0)).normalize();
+    }
+    return null;
+  };
+
+  vrm.update(0);
+  {
+    let facing = measureFacing();
+    if (facing) {
+      faceProbe = `${((Math.atan2(facing.x, facing.z) * 180) / Math.PI).toFixed(1)}°`;
+      // 转完还是背对（z<0）就再转半圈；两次仍未面向 +Z 说明测量本身有问题
+      if (facing.z < 0) {
+        holder.rotation.y += Math.PI;
+        vrm.scene.updateMatrixWorld(true);
+        const again = measureFacing();
+        if (again) faceProbe = `修正后 ${((Math.atan2(again.x, again.z) * 180) / Math.PI).toFixed(1)}°`;
       }
-    }
-    if (yaw !== null && Math.abs(yaw) > 0.01) {
-      vrm.scene.rotation.y -= yaw;
-      vrm.scene.updateMatrixWorld(true);
-      vrm.update(0);
-    }
-    faceYaw = yaw === null ? NaN : (yaw * 180) / Math.PI;
-    if (yaw === null) {
-      // 连坐标都量不到：退回最粗暴的规则（这套模型是 -Z 朝前）
-      vrm.scene.rotation.y += Math.PI;
-      vrm.scene.updateMatrixWorld(true);
-      vrm.update(0);
-      faceProbe = '兜底 180°';
-      faceYaw = 180;
     } else {
-      faceProbe = `${faceYaw.toFixed(1)}°`;
+      faceProbe = '没量到（已硬转 180°）';
     }
-    // 逃生通道：?face=180 手动决定她朝哪边，不用等我想明白
     const forced = Number(new URLSearchParams(globalThis.location?.search || '').get('face'));
     if (Number.isFinite(forced) && forced !== 0) {
-      vrm.scene.rotation.y += (forced * Math.PI) / 180;
-      vrm.scene.updateMatrixWorld(true);
-      vrm.update(0);
-      faceProbe = `手动 ${forced}°`;
+      holder.rotation.y += (forced * Math.PI) / 180;
+      faceProbe += ` + 手动 ${forced}°`;
     }
+    vrm.scene.updateMatrixWorld(true);
+    vrm.update(0);
+    onStatus?.(`已醒来 · 3D 身体（VRM）· 朝向 ${faceProbe}`);
   }
 
   // ————————————————— 静止姿态采集 —————————————————
@@ -464,7 +468,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
 
     // 她在世界里走动时，整个人跟着平移一点
-    vrm.scene.position.x = clamp((brain.state.root.x || 0) * 0.006, -0.35, 0.35);
+    holder.position.x = clamp((brain.state.root.x || 0) * 0.006, -0.35, 0.35);
   }
 
   // 诊断：把「我要它朝哪」和「它实际朝哪」并排打出来。对不上就是重定向出了问题。
