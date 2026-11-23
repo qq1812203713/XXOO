@@ -347,10 +347,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     camera.aspect = w / h;
     // 竖屏手机里她应该占满画面（原来她只占 2/3，上下全是黑）
     // 脚也要在画面里（上一版把她的小腿切掉了）
-    const visH = height * 1.06;
+    // 上下各留一点余量：她的鞋尖之前正好被画面底边切掉
+    const visH = height * 1.16;
     const dist = visH / (2 * Math.tan(camera.fov / 2 / DEG));
-    camera.position.set(0, height * 0.6, FRONT * dist);
-    camera.lookAt(0, height * 0.53, 0);
+    camera.position.set(0, height * 0.57, FRONT * dist);
+    camera.lookAt(0, height * 0.52, 0);
     camera.updateProjectionMatrix();
   }
   layout();

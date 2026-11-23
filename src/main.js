@@ -186,6 +186,14 @@ async function bootBody() {
             reportToServer(`state failed: ${err}`, 'state');
           }
         }, 2500);
+        // 每 6 秒回传一次内部状态（在演哪段动作），我据此判断她到底有没有在动
+        setInterval(() => {
+          try {
+            reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+          } catch {
+            /* ignore */
+          }
+        }, 6000);
         log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
         return;
       }
