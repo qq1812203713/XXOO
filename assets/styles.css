@@ -616,6 +616,20 @@ input {
   text-align: left;
 }
 
+/* 最后一道保险：就算 JS 一行都没跑起来，开场卡也会在 4.5 秒后自己淡出并放开点击，
+   不可能把人永远挡在外面。（JS 正常时会在点按的瞬间关掉，用不到这条。） */
+.intro {
+  animation: intro-out 0.45s ease 4.5s forwards;
+}
+
+@keyframes intro-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
 @media (max-height: 640px) {
   .intro h1 { font-size: 48px; }
   .lead { margin-bottom: 12px; }
@@ -757,5 +771,10 @@ input {
   * {
     animation: none !important;
     transition: none !important;
+  }
+
+  /* 但“自己让开”这条必须保留，否则又会被卡住 */
+  .intro {
+    animation: intro-out 0.01s linear 4.5s forwards !important;
   }
 }
