@@ -62,6 +62,14 @@ const server = http.createServer((req, res) => {
     return done(403);
   }
 
+  // 当前构建号：页面拿它比较自己是不是旧版
+  if (rel === '/version') {
+    const out = JSON.stringify({ build: BUILD });
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(out), 'Cache-Control': 'no-store' });
+    res.end(out);
+    return done(200);
+  }
+
   fs.readFile(file, (err, buf) => {
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -70,6 +78,10 @@ const server = http.createServer((req, res) => {
     }
     const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
     let body = buf;
+    if (type.startsWith('text/html')) {
+      // 把构建号写进 HTML，页面上就能显示“我是哪一版”——排查缓存问题全靠它
+      body = Buffer.from(buf.toString('utf8').replaceAll('__BUILD__', BUILD), 'utf8');
+    }
     if (type.startsWith('text/javascript') && !rel.includes('/vendor/')) {
       const rewritten = bustImports(buf.toString('utf8'));
       if (rewritten !== buf.toString('utf8')) body = Buffer.from(rewritten, 'utf8');

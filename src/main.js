@@ -209,6 +209,20 @@ window.addEventListener('pagehide', saveState);
 window.addEventListener('beforeunload', saveState);
 
 // —— 主循环 ——
+const DEBUG = (() => {
+  try {
+    return new URLSearchParams(location.search).has('debug');
+  } catch {
+    return false;
+  }
+})();
+const debugEl = DEBUG ? document.getElementById('dbg') : null;
+if (debugEl) {
+  debugEl.hidden = false;
+  debugEl.textContent = 'diag…';
+}
+let frameN = 0;
+
 let last = performance.now();
 let lastSave = performance.now();
 
@@ -221,6 +235,11 @@ function loop(now) {
     brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
     if (body3d) body3d.sync(brain, motors.parts.face, dt);
     else if (anime) anime.sync(brain, motors.parts.face, dt);
+
+    if (debugEl && body3d && (frameN++ % 20 === 0)) {
+      const lines = body3d.debugLines ? body3d.debugLines() : [];
+      debugEl.textContent = [`build v${BUILD.slice(-4)}`, ...lines].join('\n');
+    }
     renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
     ui.frame(dt, Date.now());
   } catch (err) {
@@ -239,6 +258,35 @@ function loop(now) {
 brain.tick(1 / 60, { pointer: null, petting: false });
 renderer.resize();
 requestAnimationFrame(loop);
+
+// —— 版本徽章 + 旧版提醒 ——
+// 这几个月最耗时间的坑不是代码，是“你看到的根本不是最新那版”。所以让它自己说出来。
+const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
+(function stampVersion() {
+  const el = document.getElementById('ver');
+  if (el) el.textContent = `v${BUILD.slice(-4)}`;
+  const check = async () => {
+    try {
+      const r = await fetch(`./version?t=${Date.now()}`, { cache: 'no-store' });
+      const j = await r.json();
+      if (j.build && j.build !== BUILD && !document.getElementById('stale')) {
+        const btn = document.createElement('button');
+        btn.id = 'stale';
+        btn.textContent = '有新版本，点此刷新';
+        btn.style.cssText =
+          'position:fixed;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:80;' +
+          'padding:8px 16px;border-radius:999px;border:1px solid rgba(255,159,190,.6);background:rgba(90,18,42,.92);' +
+          'color:#ffd9e6;font:12px/1 system-ui;cursor:pointer';
+        btn.onclick = () => location.reload();
+        document.body.appendChild(btn);
+      }
+    } catch {
+      /* 离线就算了 */
+    }
+  };
+  setTimeout(check, 1500);
+  setInterval(check, 8000);
+})();
 
 // 报到：告诉页面“我活着”，并让开场卡显示实际画布尺寸（排查时一眼就能看明白）
 window.__booted = true;

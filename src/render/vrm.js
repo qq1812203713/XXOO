@@ -36,6 +36,37 @@ async function loadThree() {
   GLTFLoader = mod.GLTFLoader;
 }
 
+// 显式的骨链定义。
+// 关键教训：three-vrm 的 normalized humanoid bone 是普通 Object3D，**不是** Bone，
+// 所以 `child.isBone` 永远是 false —— 之前靠它找子骨/找父骨，全部失效，
+// 导致每根骨的“静止朝向”都退化成 (0,1,0)，于是整具身体被转到莫名其妙的方向。
+const CHAINS = [
+  ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head'],
+  ['upperChest', 'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand'],
+  ['upperChest', 'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand'],
+  ['hips', 'leftUpperLeg', 'leftLowerLeg', 'leftFoot', 'leftToes'],
+  ['hips', 'rightUpperLeg', 'rightLowerLeg', 'rightFoot', 'rightToes'],
+];
+for (const s0 of ['left', 'right']) {
+  for (const f of ['Thumb', 'Index', 'Middle', 'Ring', 'Little']) {
+    CHAINS.push([
+      `${s0}Hand`,
+      `${s0}${f}Proximal`,
+      `${s0}${f}Intermediate`,
+      `${s0}${f}Distal`,
+    ]);
+  }
+}
+
+const PARENT = new Map();
+const CHILD = new Map();
+for (const chain of CHAINS) {
+  for (let i = 1; i < chain.length; i++) {
+    if (!PARENT.has(chain[i])) PARENT.set(chain[i], chain[i - 1]);
+    if (!CHILD.has(chain[i - 1])) CHILD.set(chain[i - 1], chain[i]);
+  }
+}
+
 // 我们的骨架：拇指 2 节，其余 4 指 3 节；模型是 5 指 × 3 节，所以拇指末端借用第二节
 const FINGERS = [
   { bone: 'Thumb', rig: 'thumb', seg: 2 },
@@ -68,6 +99,8 @@ export const REQUIRED_BONES = (() => {
   }
   return out;
 })();
+
+const ALL_BONE_NAMES = [...new Set([...REQUIRED_BONES, ...PARENT.keys(), ...PARENT.values()])];
 
 export const USED_EXPRESSIONS = [...new Set(Object.values(EXPRESSIONS).filter(Boolean)), 'blink', 'a'];
 
@@ -115,47 +148,43 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const V = THREE.Vector3;
   const Q = THREE.Quaternion;
 
-  for (const name of REQUIRED_BONES) {
+  for (const name of ALL_BONE_NAMES) {
     const b = node(name);
     if (!b) continue;
     const q = new Q();
     b.getWorldQuaternion(q);
     const pos = new V();
     b.getWorldPosition(pos);
-    // 朝向：指向第一根子骨；没有子骨就沿用父骨的朝向
-    let dir = null;
-    const childBone = b.children.find((c) => c.isBone);
-    if (childBone) {
-      const cp = new V();
-      childBone.getWorldPosition(cp);
-      dir = cp.sub(pos).normalize();
-    }
-    rest[name] = { q, dir, pos };
-  }
-  // 补上终端骨（指尖、脚趾）的朝向
-  for (const name of REQUIRED_BONES) {
-    if (!rest[name] || rest[name].dir) continue;
-    const parentName = REQUIRED_BONES.find((n) => {
-      const b = node(n);
-      return b && b.children.some((c) => c === node(name));
-    });
-    rest[name].dir = (parentName && rest[parentName]?.dir) ? rest[parentName].dir.clone() : new V(0, 1, 0);
+    rest[name] = { q, dir: null, pos };
   }
 
-  // 所有骨（含 shoulder 这种我们不去写的）的静止世界四元数，用作父级兜底
-  const restWorldQ = new Map();
-  for (const name of REQUIRED_BONES) {
+  // 静止朝向：指向显式链里的下一根骨
+  for (const name of ALL_BONE_NAMES) {
+    if (!rest[name]) continue;
+    const childName = CHILD.get(name);
     const b = node(name);
-    if (b) restWorldQ.set(b, rest[name].q.clone());
-    let p = b?.parent;
-    while (p) {
-      if (p.isBone && !restWorldQ.has(p)) {
-        const q = new Q();
-        p.getWorldQuaternion(q);
-        restWorldQ.set(p, q);
-      }
-      p = p.parent;
+    const c = childName ? node(childName) : null;
+    if (b && c) {
+      const cp = new V();
+      c.getWorldPosition(cp);
+      const d = cp.sub(rest[name].pos).normalize();
+      if (d.lengthSq() > 1e-6) rest[name].dir = d;
     }
+  }
+  // 终端骨（指尖、脚趾、头）沿用上一节的朝向
+  for (const name of ALL_BONE_NAMES) {
+    if (!rest[name] || rest[name].dir) continue;
+    const pName = PARENT.get(name);
+    if (pName && rest[pName]?.dir) rest[name].dir = rest[pName].dir.clone();
+  }
+  for (const name of ALL_BONE_NAMES) {
+    if (rest[name] && !rest[name].dir) rest[name].dir = new V(0, 1, 0);
+  }
+
+  // name -> 静止世界四元数（父级兜底用）
+  const restWorldQ = new Map();
+  for (const name of ALL_BONE_NAMES) {
+    if (rest[name]) restWorldQ.set(name, rest[name].q.clone());
   }
 
   const box = new THREE.Box3().setFromObject(vrm.scene);
@@ -178,24 +207,18 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   layout();
 
   // ————————————————— 每帧：世界四元数累积 —————————————————
-  const wq = new Map(); // Object3D -> 这一帧的目标世界四元数
-  const aq = new Map(); // Object3D -> 累积的世界增量（相对静止姿态）
+  const wq = new Map(); // name -> 这一帧的目标世界四元数
+  const aq = new Map(); // name -> 累积的世界增量（相对静止姿态）
   const IDENT = new Q();
-
-  const parentBoneOf = (b) => {
-    let p = b.parent;
-    while (p && !p.isBone) p = p.parent;
-    return p;
-  };
 
   function writeLocal(name, targetWorldQ) {
     const b = node(name);
     if (!b) return;
-    const p = parentBoneOf(b);
-    const parentQ = p ? wq.get(p) || restWorldQ.get(p) || IDENT : IDENT;
+    const pName = PARENT.get(name);
+    const parentQ = pName ? (wq.get(pName) || restWorldQ.get(pName) || IDENT) : IDENT;
     const local = parentQ.clone().invert().multiply(targetWorldQ);
     b.quaternion.copy(local);
-    wq.set(b, targetWorldQ);
+    wq.set(name, targetWorldQ);
   }
 
   // 把某根骨「转到」指定世界方向：解出最小的旋转
@@ -207,20 +230,23 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const qd = new Q().setFromUnitVectors(r.dir, d1);
     const target = qd.multiply(r.q);
     writeLocal(name, target);
+    lastTarget.set(name, d1);
   }
 
   // 绕某个世界轴转一根骨（用于脊柱/头这类只需要“倾斜多少”的关节）
+  const lastTarget = new Map(); // 本帧给每根骨设定的目标方向（诊断用）
+
   const eulerTmp = new THREE.Euler();
   function turn(name, eulerWorld) {
     const r = rest[name];
     const b = node(name);
     if (!r || !b) return;
-    const p = parentBoneOf(b);
-    const parentAcc = p ? aq.get(p) || IDENT : IDENT;
+    const pName = PARENT.get(name);
+    const parentAcc = pName ? aq.get(pName) || IDENT : IDENT;
     eulerTmp.set(eulerWorld.x, eulerWorld.y, eulerWorld.z, 'YXZ');
     const dq = new Q().setFromEuler(eulerTmp);
     const a = parentAcc.clone().multiply(dq);
-    aq.set(b, a);
+    aq.set(name, a);
     writeLocal(name, a.clone().multiply(r.q));
   }
 
@@ -230,7 +256,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   // 手腕相对静止姿态转了多少（手指卷曲的轴要跟着它一起转）
   const handDelta = (handName) => {
-    const w = wq.get(node(handName));
+    const w = wq.get(handName);
     if (!w || !rest[handName]) return new Q();
     return w.clone().multiply(rest[handName].q.clone().invert());
   };
@@ -251,6 +277,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
     wq.clear();
     aq.clear();
+    lastTarget.clear();
 
     // —— 躯干：绕世界 Z 轴侧倾，逐段累积 ——
     const pelvis = j('pelvis');
@@ -381,6 +408,41 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     vrm.scene.position.x = clamp((brain.state.root.x || 0) * 0.006, -0.35, 0.35);
   }
 
+  // 诊断：把「我要它朝哪」和「它实际朝哪」并排打出来。对不上就是重定向出了问题。
+  const DEBUG_BONES = [
+    'leftUpperArm', 'rightUpperArm',
+    'leftLowerArm', 'rightLowerArm',
+    'leftHand', 'rightHand',
+    'leftUpperLeg', 'rightUpperLeg',
+    'leftLowerLeg', 'rightLowerLeg',
+    'leftIndexProximal', 'rightIndexProximal',
+  ];
+  function debugLines() {
+    const out = [];
+    vrm.scene.updateMatrixWorld(true);
+    for (const name of DEBUG_BONES) {
+      const b = node(name);
+      const t = lastTarget.get(name);
+      if (!b) {
+        out.push(`${name.padEnd(18)} 骨骼不存在`);
+        continue;
+      }
+      const childName = CHILD.get(name);
+      const child = childName ? node(childName) : null;
+      let actual = null;
+      if (child) {
+        const p0 = new V();
+        const p1 = new V();
+        b.getWorldPosition(p0);
+        child.getWorldPosition(p1);
+        actual = p1.sub(p0).normalize();
+      }
+      const f = (v) => (v ? `(${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)})` : '   —   ');
+      out.push(`${name.padEnd(18)} 目标${f(t)} 实际${f(actual)}`);
+    }
+    return out;
+  }
+
   const clock = new THREE.Clock();
 
   function sync(brain, face, dt) {
@@ -400,6 +462,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     camera,
     renderer,
     rest,
+    debugLines,
     sync,
     resize: layout,
     get ready() {
