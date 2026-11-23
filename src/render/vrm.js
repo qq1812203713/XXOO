@@ -440,6 +440,37 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (rest[name]) restWorldQ.set(name, rest[name].q.clone());
   }
 
+  // ————————————————— 掌心的横轴 —————————————————
+  // aim() 只管骨头的「方向」，不管绕骨头轴的「拧」。手臂从 T 字横举放下来时，
+  // 是「最小旋转」把骨头带过去的 —— 掌心于是朝后、朝外，看起来就是手腕拧断了。
+  // 真人自然站立时掌心贴着大腿：指根那条连线（掌心横轴）基本是身体的前后方向。
+  // 这里从模型自己量出这条线（不写死），摆完姿势再把前臂拧过去。
+  const PALM_LINE = Object.create(null); // 侧 -> 前臂骨局部坐标下的单位向量
+  const FINGER_SIGN = Object.create(null); // 侧 -> 手指往掌心弯的旋转方向
+  const BODY_FWD = new V(0, 0, -1).applyQuaternion(holder.quaternion).normalize();
+  try {
+    for (const sd of ['left', 'right']) {
+      const lower = rest[`${sd}LowerArm`];
+      const idx = rest[`${sd}IndexProximal`];
+      const lit = rest[`${sd}LittleProximal`];
+      if (!lower || !idx || !lit) continue;
+      const line = lit.pos.clone().sub(idx.pos);
+      if (line.lengthSq() < 1e-8) continue;
+      PALM_LINE[sd] = line.normalize().applyQuaternion(lower.q.clone().invert()).normalize();
+      // 掌心的那一侧：中指指向 × 指根连线，取指向身体中线的那一头
+      const mid = rest[`${sd}MiddleProximal`];
+      const medial = new V(sd === 'right' ? 1 : -1, 0, 0);
+      if (mid) {
+        const kWorld = line.clone().normalize();
+        const fWorld = mid.dir.clone();
+        const p = new V().crossVectors(kWorld, fWorld);
+        FINGER_SIGN[sd] = p.dot(medial) >= 0 ? 1 : -1;
+      }
+    }
+  } catch {
+    /* 量不出来就退化成不拧 */
+  }
+
   // —— 把长发从身前挪到身后 ——
   // 模型原件的双马尾静止姿态是贴在身前的，把胳膊和裙子都挡住了。
   // 这里一次性给发根骨加一个“向后”的世界旋转偏移：轴不用猜，
@@ -1200,9 +1231,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   function poseFingers(bs, curl) {
     if (!curl) return;
     const dh = handDelta(`${bs}Hand`);
-    const axis = Z_AXIS.clone().applyQuaternion(dh);
-    const handDir = rest[`${bs}Hand`]?.dir;
-    const sign = -(handDir && handDir.x < 0 ? -1 : 1); // 手心那一侧
+    const hq = wq.get(`${bs}Hand`);
+    const kLocal = PALM_LINE[bs];
+    if (!hq || !kLocal) return; // 量不到掌心横轴就不乱动手指
+    // 手指的屈曲轴就是「指根连线」，而且它必须跟着手腕一起转。
+    // 以前这里写的是世界 Z 轴 —— 手腕一旦被拧正，手指就会朝侧面弯。
+    const axis = kLocal.clone().applyQuaternion(hq).normalize();
+    const sign = FINGER_SIGN[bs] || 1;
     for (const f of Object.keys(FINGER_WEIGHT)) {
       const w = FINGER_WEIGHT[f];
       let acc = 0;
@@ -1216,9 +1251,40 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
   }
 
+  // 把骨头绕自己的轴拧一下（世界空间里表达，内部转成局部）
+  function rollBone(name, axisWorld, angle) {
+    if (!angle || !Number.isFinite(angle)) return;
+    const q = wq.get(name);
+    if (!q) return;
+    const roll = new Q().setFromAxisAngle(axisWorld.clone().normalize(), angle);
+    writeLocal(name, roll.clone().multiply(q));
+  }
+
+  // 掌心对齐：让「指根连线」落到身体的前后方向上（取离当前最近的那一头）
+  function alignPalm(bs, dirWorld, weight) {
+    if (!weight || weight < 0.01) return;
+    try {
+        const local = PALM_LINE[bs];
+        const lq = wq.get(`${bs}LowerArm`);
+    if (!local || !lq) return;
+      const axis = dirWorld.clone().normalize();
+      const cur = local.clone().applyQuaternion(lq).projectOnPlane(axis);
+      const tgt = BODY_FWD.clone().projectOnPlane(axis);
+      if (cur.lengthSq() < 1e-6 || tgt.lengthSq() < 1e-6) return;
+      cur.normalize();
+      tgt.normalize();
+      if (tgt.dot(cur) < 0) tgt.negate();
+      const ang = Math.atan2(new V().crossVectors(cur, tgt).dot(axis), cur.dot(tgt));
+      rollBone(`${bs}LowerArm`, axis, ang * weight);
+    } catch {
+      /* 拧不动就不拧，不能因为手不好看把整个身体卡死 */
+    }
+  }
+
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
   const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
-  function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = 0) {
+  const REST_CURL = 0.15; // 自然放松的手：指节微屈，不是笔直张开
+  function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = REST_CURL) {
     const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'L' : 'R']).clone().normalize();
     const raise = clamp(1 + dir.y, 0, 1);
     const sRest = rest[`${bs}Shoulder`]?.dir;
@@ -1229,8 +1295,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (axis.lengthSq() < 1e-6) axis = X_AXIS.clone();
     axis.normalize();
     const flex = Math.max(elbow, 0.05 + 0.3 * raise);
-    const dirFore = rotateAround(dir, axis, flex);
+    let dirFore = rotateAround(dir, axis, flex);
+    // 提携角：前臂并不和上臂成一条直线，自然状态下往外偏 5–15°（女性更大）。
+    // 少了这一下，两条胳膊会像两根垂直的棍子。
+    dirFore = dirFore.clone();
+    dirFore.x += (bs === 'right' ? -0.13 : 0.13);
+    dirFore.normalize();
     aim(`${bs}LowerArm`, dirFore);
+    // 胳膊越接近垂下，掌心越该贴着身体；举起来时这条不适用
+    alignPalm(bs, dirFore, clamp(1 - raise * 1.25, 0, 1));
     aim(`${bs}Hand`, rotateAround(dirFore, axis, hand));
     poseFingers(bs, curl);
   }
