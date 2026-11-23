@@ -198,6 +198,12 @@ async function tryBoot3D() {
       return false;
     }
     body3d = body;
+    document.getElementById('faceview')?.addEventListener('click', () => {
+      if (!body3d) return;
+      const on = body3d.setFaceView(!body3d.faceView);
+      document.getElementById('faceview')?.classList.toggle('on', !!on);
+      hudNote(on ? '推近 · 看她的脸' : '退回全身');
+    });
     document.getElementById('flip')?.addEventListener('click', () => {
       const deg = body3d?.turnBody?.(180);
       hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
@@ -207,11 +213,25 @@ async function tryBoot3D() {
     girl3dCanvas?.classList.add('on');
     last3DFail = '';
     showBodyHint();
+    // ?face=1（或写在 .flags 里）：一进来就是看脸模式，方便我自己核对细节
+    try {
+      const f = new URLSearchParams([location.search.replace(/^\?/, ''), globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'));
+      if (f.get('face') === '1') {
+        body3d.setFaceView(true);
+        document.getElementById('faceview')?.classList.add('on');
+      }
+    } catch {
+      /* ignore */
+    }
     markAwake('3D 身体（VRM）');
     setTimeout(startSnapshots, 900);
     setTimeout(() => {
       try {
-        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+        const st = body3d?.debugState?.() ?? {};
+        st.llm = { on: cortex.shouldUseLLM(), busy: cortex.busy, err: cortex.lastError, cfg: { base: cortex.cfg.baseUrl, model: cortex.cfg.model } };
+        st.goal = brain?.state?.goal?.type || 'idle';
+        st.bodyWish = brain?.state?.bodyWish?.clip || null;
+        reportToServer(JSON.stringify(st), 'state');
       } catch (err) {
         reportToServer(`state failed: ${err}`, 'state');
       }

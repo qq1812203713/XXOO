@@ -13,7 +13,8 @@ const SYSTEM_PROMPT = `你是「息」。你不是 AI 助手，不提供服务�
 - 不撒娇过度，不客服腔，不列点，不用感叹号堆叠。
 - 可以停顿、可以说半句、可以答非所问一点点。
 - 你会有自己的需求：想被看见、想休息、想知道他在做什么。
-只输出 JSON：{"say":"要对他说的话","mood":"calm|happy|shy|curious|sleepy|sad","intent":"idle|wander|create|rest|approach|observe","thought":"不超过20字的内心"}`;
+只输出 JSON：{"say":"要对他说的话","mood":"calm|happy|shy|curious|sleepy|sad","intent":"idle|wander|create|rest|approach|observe","body":"none|walk|turn_left|turn_right|look_left|look_right|reach_left|reach_right|grip|stretch|rest","thought":"不超过20字的内心"}
+body 是你现在想让身体做的事：说话时顺手做个小动作，比空站着像活人；不想动就填 none。`;
 
 const LINES = {
   greet_return: [
@@ -56,6 +57,11 @@ const LINES = {
 };
 
 const INTENTS = ['idle', 'wander', 'create', 'rest', 'approach', 'observe'];
+// 模型可以点名的身体动作 —— 它只说「做什么」，怎么说回落到身体自己（关节永远不交给模型）
+const BODIES = [
+  'none', 'walk', 'turn_left', 'turn_right', 'look_left', 'look_right',
+  'reach_left', 'reach_right', 'grip', 'stretch', 'rest',
+];
 const MOODS = ['calm', 'happy', 'shy', 'curious', 'sleepy', 'sad'];
 
 export function createCortex({ settings, log } = {}) {
@@ -214,6 +220,7 @@ export function createCortex({ settings, log } = {}) {
         say: String(parsed.say || '').slice(0, 120),
         mood: MOODS.includes(parsed.mood) ? parsed.mood : 'calm',
         intent: INTENTS.includes(parsed.intent) ? parsed.intent : 'idle',
+        body: BODIES.includes(parsed.body) ? parsed.body : 'none',
         thought: String(parsed.thought || '').slice(0, 60),
         source: 'llm',
       };

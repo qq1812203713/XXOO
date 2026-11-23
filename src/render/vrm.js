@@ -102,7 +102,9 @@ export const REQUIRED_BONES = (() => {
 
 const ALL_BONE_NAMES = [...new Set([...REQUIRED_BONES, ...PARENT.keys(), ...PARENT.values()])];
 
-export const USED_EXPRESSIONS = [...new Set(Object.values(EXPRESSIONS).filter(Boolean)), 'blink', 'a'];
+export const USED_EXPRESSIONS = [
+  ...new Set([...Object.values(EXPRESSIONS).filter(Boolean), 'blink', 'a', 'i', 'u', 'e', 'o', 'neutral']),
+];
 
 export async function create3DBody({ canvas, modelUrl, onStatus }) {
   if (!hasWebGL()) return null;
@@ -142,6 +144,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const gltf = await loader.loadAsync(modelUrl);
   const vrm = gltf.userData.vrm;
   if (!vrm) throw new Error('这个文件不是 VRM（没有 humanoid）');
+
+  // 这个模型到底有哪些表情 —— 不查表写死，直接问它自己。
+  // （写死的名字如果不在这具模型里，setValue 会安静地什么也不干，看起来就是「没有表情」。）
+  const AVAILABLE_EXPR = new Set(
+    Object.keys(vrm.expressionManager?.expressionMap || {}).map((k) => String(k).toLowerCase()),
+  );
 
   // 不再调用 VRMUtils.rotateVRM0：它会按版本号偷偷转半圈，转没转无从得知。
   // 朝向统一由下面的实测决定，只有一个入口。
@@ -414,6 +422,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   let t = 0;
   let ready = false;
+  // 镜头原位（全身）—— 看脸的时候从它慢慢推过去
+  const camHome = { pos: new THREE.Vector3(), tgt: new THREE.Vector3() };
+  const tmpV3 = new THREE.Vector3();
 
   function layout() {
     const w = canvas.clientWidth || window.innerWidth || 1;
@@ -427,6 +438,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const dist = visH / (2 * Math.tan(camera.fov / 2 / DEG));
     camera.position.set(0, height * 0.57, FRONT * dist);
     camera.lookAt(0, height * 0.52, 0);
+    camHome.pos.copy(camera.position);
+    camHome.tgt.set(0, height * 0.52, 0);
     camera.updateProjectionMatrix();
   }
   layout();
@@ -509,27 +522,118 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   const lastDiag = {};
   // 表情、眼动、整体位移 —— 与骨骼动画相互独立
-  function applyFace(brain, face, gx, gy) {
+  // ——————————————— 脸 ———————————————
+  // 这个模型有 17 组表情（a/i/u/e/o、blink、joy、angry、sorrow、fun、look*）。
+  // 以前只写 blink + 一个固定 0.75 的表情，所以看上去「没有表情」。现在是连续权重：
+  // 情绪慢慢靠过去，眨眼是随机的，说话时嘴形在 a/i/u/e/o 之间走。
+  const FACE_W = { joy: 0, sorrow: 0, fun: 0, angry: 0, neutral: 0 };
+  const MOUTH_W = { a: 0, i: 0, u: 0, e: 0, o: 0 };
+  const EMO = {
+    calm: { joy: 0.12, neutral: 0.3 },
+    happy: { joy: 0.92, fun: 0.18 },
+    shy: { fun: 0.66, joy: 0.3 },
+    curious: { joy: 0.34, fun: 0.2 },
+    sleepy: { sorrow: 0.4, neutral: 0.34 },
+    sad: { sorrow: 0.84 },
+    startled: { angry: 0.2, joy: 0.12 },
+  };
+  let blinkNext = 2.4;
+  let blinkLeft = 0;
+  let mouthPhase = 0;
+  let mouthIdx = 0;
+  const VOWELS = ['a', 'i', 'u', 'e', 'o'];
+
+  function applyFace(brain, face, gx, gy, step) {
+    const h = 1 / 60;
+    const d = clamp(step || h, 1 / 240, 0.1);
     const f = face?.state || {};
     const gazeX = gx ?? clamp((f.gazeX ?? 0) / 3, -1, 1);
     const gazeY = gy ?? clamp((f.gazeY ?? 0) / 3, -1, 1);
+
+    // 眼球：VRM 的 eye 骨，往他要看的方向转
     for (const side of ['left', 'right']) {
       const eye = node(`${side}Eye`);
-      if (eye) eye.rotation.set(-gazeY * 0.28, gazeX * 0.4, 0);
+      if (eye) eye.rotation.set(-gazeY * 0.3, gazeX * 0.42, 0);
     }
+
     const em = vrm.expressionManager;
     if (em) {
-      const blink = clamp((f.blink ?? 0) + (1 - clamp(f.eyeOpen ?? 1, 0, 1)) * 0.6, 0, 1);
-      em.setValue('blink', blink);
-      const talking = brain?.state?.talking > 0 ? 1 : 0;
-      const syllable = 0.5 + 0.5 * Math.sin(t * 18.7) * Math.sin(t * 4.3);
-      em.setValue('a', clamp(talking * syllable, 0, 1));
+      // —— 情绪：朝目标慢慢靠，别硬切 ——
       const mood = brain?.state?.mood || 'calm';
-      for (const [k, name] of Object.entries(EXPRESSIONS)) {
-        if (name) em.setValue(name, k === mood ? 0.75 : 0);
+      const target = EMO[mood] || EMO.calm;
+      const k = 1 - Math.exp(-4.5 * d);
+      for (const key of Object.keys(FACE_W)) {
+        const want = target[key] || 0;
+        FACE_W[key] += (want - FACE_W[key]) * k;
+        if (EXPRESSIONS[mood] === key) {
+          // 情绪峰值时再多给一点点，别让她永远停在“标准微笑”
+          FACE_W[key] = clamp(FACE_W[key] + 0.0, 0, 1);
+        }
+        if (AVAILABLE_EXPR.has(key)) em.setValue(key, clamp(FACE_W[key], 0, 1));
+      }
+
+      // —— 眨眼：自己的节奏（2~6 秒一次，偶尔连眨两下）——
+      blinkNext -= d;
+      if (blinkNext <= 0) {
+        blinkLeft = 0.14;
+        blinkNext = 2 + Math.random() * 4;
+        if (Math.random() < 0.22) blinkNext = 0.32; // 连眨
+      }
+      if (blinkLeft > 0) blinkLeft = Math.max(0, blinkLeft - d);
+      const auto = blinkLeft > 0 ? Math.sin((1 - blinkLeft / 0.14) * Math.PI) : 0;
+      const eyeMid = clamp(1 - (f.eyeOpen ?? 1), 0, 1);
+      const sleep = mood === 'sleepy' ? 0.45 : 0;
+      em.setValue('blink', clamp(Math.max(auto, eyeMid, (f.blink ?? 0)) + sleep, 0, 1));
+
+      // —— 说话：嘴形在 a/i/u/e/o 之间走，不是开合 ——
+      const talking = (brain?.state?.talking || 0) > 0 ? 1 : 0;
+      mouthPhase += d * 13;
+      if (mouthPhase > Math.PI) {
+        mouthPhase -= Math.PI;
+        if (Math.random() < 0.6) mouthIdx = Math.floor(Math.random() * VOWELS.length);
+      }
+      const env = talking * (0.35 + 0.5 * Math.abs(Math.sin(mouthPhase)));
+      for (const v of VOWELS) {
+        const want = v === VOWELS[mouthIdx] ? env : 0;
+        MOUTH_W[v] += (want - MOUTH_W[v]) * (1 - Math.exp(-14 * d));
+        if (AVAILABLE_EXPR.has(v)) em.setValue(v, clamp(MOUTH_W[v], 0, 1));
+      }
+      // 不说话的抿嘴笑：joy 高的时候嘴巴有一点形状
+      if (!talking) {
+        const smile = clamp(FACE_W.joy * 0.22, 0, 1);
+        if (AVAILABLE_EXPR.has('a')) em.setValue('a', Math.max(MOUTH_W.a, smile * 0.5));
       }
     }
+
     holder.position.x = clamp((brain?.state?.root?.x || 0) * 0.006, -0.35, 0.35);
+  }
+
+  // —— 看脸：镜头推近到她的头，细节才看得见 ——
+  let faceView = 0;
+  let faceViewTo = 0;
+  function setFaceView(on) {
+    faceViewTo = on ? 1 : 0;
+    return faceViewTo;
+  }
+  function applyCamera(d) {
+    faceView += (faceViewTo - faceView) * (1 - Math.exp(-4 * d));
+    if (faceView < 0.002) {
+      camera.position.copy(camHome.pos);
+      camera.lookAt(camHome.tgt);
+      return;
+    }
+    const headNode = node('head');
+    if (!headNode) {
+      camera.position.copy(camHome.pos);
+      camera.lookAt(camHome.tgt);
+      return;
+    }
+    headNode.getWorldPosition(tmpV3);
+    // 推近到离头 0.42 m —— 睫毛、瞳孔、腮红都在这个距离上才看得见
+    const near = tmpV3.clone().add(new V(0, height * 0.01, FRONT * 0.42));
+    camera.position.lerpVectors(camHome.pos, near, faceView);
+    const lookAt = new V().lerpVectors(camHome.tgt, tmpV3, faceView);
+    camera.lookAt(lookAt);
   }
 
   let dt = 0; // 当前帧时长，writeLocal 的平滑用
@@ -1150,6 +1254,54 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
   }
 
+  // ————— 身体听谁的：大模型点名的动作 > 大脑的目标 > 自己发呆 —————
+  // 以前这一段是 Math.random() 掷骰子，所以她看起来「有动作，但和她想的事无关」。
+  let wishSeen = 0;
+  function cueFromBrain() {
+    const s = lastBrain?.state;
+    if (!s) return null;
+
+    // 1) 大模型刚刚点了名：「抬一下手」
+    const wish = s.bodyWish;
+    if (wish && wish.id && wish.id !== wishSeen) {
+      wishSeen = wish.id;
+      if (wish.clip === 'walk') return { walk: true, sec: 2.6 };
+      if (wish.clip === 'turnL') return { turn: -1 };
+      if (wish.clip === 'turnR') return { turn: 1 };
+      return { clip: wish.clip, hold: 2.6 };
+    }
+
+    // 2) 她自己在做的事（目标）
+    const goal = s.goal || { type: 'idle', phase: 1 };
+    const mood = s.mood || 'calm';
+    switch (goal.type) {
+      case 'create':
+        return { clip: goal.phase >= 2 ? 'grip' : 'reachR', hold: 1.8 };
+      case 'approach': {
+        const px = s.pointer && s.pointer.active ? s.pointer.x : s.root.x;
+        const far = Math.abs(px - s.root.x) > 22;
+        if (far) return { walk: true, sec: 2.2 };
+        return { clip: Math.random() < 0.5 ? 'reachL' : 'reachR', hold: 1.6 };
+      }
+      case 'wander':
+        return Math.random() < 0.55 ? { walk: true, sec: 2.8 } : { turn: Math.random() < 0.5 ? -1 : 1 };
+      case 'arrange':
+        return { clip: Math.random() < 0.5 ? 'reachL' : 'reachR', hold: 1.8 };
+      case 'observe':
+        return { clip: Math.random() < 0.5 ? 'lookL' : 'lookR', hold: 2.6 };
+      case 'rest':
+        return null; // 她说要休息，就别再给她加动作
+      default:
+        break;
+    }
+
+    // 3) 什么都没在发生：很少地自己动一下（心情好才伸懒腰）
+    if (mood === 'happy' && Math.random() < 0.34) return { clip: 'stretch', hold: 2.6 };
+    if (mood === 'curious' && Math.random() < 0.4) return { clip: Math.random() < 0.5 ? 'lookL' : 'lookR', hold: 2.4 };
+    if (Math.random() < 0.16) return { clip: 'grip', hold: 2.0 };
+    return null;
+  }
+
   function driveNav(dt) {
     if (FREEZE != null) {
       nav.mode = 'freeze';
@@ -1179,14 +1331,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         playAction('idle', 0.45);
       }
     } else if (t > nav.until && current === 'idle') {
-      const r = Math.random();
-      if (r < 0.4) startTurn(Math.random() < 0.5 ? -1 : 1);
-      else if (r < 0.62) startWalk(2.4 + Math.random() * 3);
-      else if (r < 0.74) playAction('grip');
-      else if (r < 0.85) playAction(r < 0.795 ? 'lookL' : 'lookR');
-      else if (r < 0.94) playAction(r < 0.895 ? 'reachL' : 'reachR');
-      else playAction('stretch');
-      nav.until = t + 3 + Math.random() * 4;
+      const cue = cueFromBrain();
+      if (cue && cue.walk) startWalk(cue.sec || 2.6);
+      else if (cue && cue.turn) startTurn(cue.turn);
+      else if (cue && cue.clip) {
+        playAction(cue.clip, 0.28);
+        nav.until = t + (cue.hold || 2.2);
+      } else {
+        // 大脑没有吩咐：她也不需要一直有动作，安安静静站一会儿也是她
+        nav.until = t + 2.6 + Math.random() * 2.6;
+      }
     }
     applyStage();
   }
@@ -1281,8 +1435,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       mixer.update(step); // 标准插值 / 混合
       lastDiag.poseSize = 'mixer';
       lastDiag.clip = current;
-      applyFace(brain, face);
+      applyFace(brain, face, undefined, undefined, step);
     }
+    applyCamera(step);
     vrm.update(step);
     renderer.render(scene, camera);
     ready = true;
@@ -1315,6 +1470,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     debugLines,
     sync,
     nerveFrame,
+    // 她把镜头拉近到自己脸上（细节模式）
+    setFaceView,
+    get faceView() {
+      return faceViewTo;
+    },
     // 她现在在演哪一段 —— 让“神经系统”里写的字和画面对得上
     action: () => ({ clip: current, count: actsPlayed, nav: nav.mode, walked: nav.walked }),
     // 手动转身：每按一次 +deg（默认 180），并记住到下次打开
@@ -1365,6 +1525,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         armA: lastDiag.armA === undefined ? null : +lastDiag.armA.toFixed(3),
         arms: { L: deg('armLA'), R: deg('armRA'), foreL: deg('foreLA'), foreR: deg('foreRA'), handL: deg('handLA'), handR: deg('handRA') },
         rightUpperArm: q('rightUpperArm'),
+        expr: Object.fromEntries(
+          ['joy', 'fun', 'sorrow', 'angry', 'blink', 'a'].map((k) => [
+            k,
+            +(vrm.expressionManager?.getValue?.(k) ?? 0).toFixed(2),
+          ]),
+        ),
         spine: q('spine'),
         restDirArm: rest.rightUpperArm?.dir ? rest.rightUpperArm.dir.toArray().map((v) => +v.toFixed(3)) : null,
       };

@@ -34,6 +34,25 @@ function defaultIntent() {
   };
 }
 
+// 模型的口令 → 身体能演的动作
+const BODY_CLIP = {
+  walk: 'walk',
+  turn_left: 'turnL',
+  turn_right: 'turnR',
+  look_left: 'lookL',
+  look_right: 'lookR',
+  reach_left: 'reachL',
+  reach_right: 'reachR',
+  grip: 'grip',
+  stretch: 'stretch',
+  rest: 'idle',
+};
+const BODY_CN = {
+  walk: '走两步', turn_left: '往左转', turn_right: '往右转',
+  look_left: '往左看', look_right: '往右看', reach_left: '伸出左手',
+  reach_right: '伸出右手', grip: '握一下手', stretch: '伸个懒腰', rest: '停下来',
+};
+
 export function createBrain({ rig, servos, motors, drives, memory, world, spinal, cortex, log, goals }) {
   const g = goals || createGoals({ log });
 
@@ -56,6 +75,9 @@ export function createBrain({ rig, servos, motors, drives, memory, world, spinal
     fidget: null,
     nextFidget: 4,
     nextThink: 6,
+    // 大模型点名的身体动作（只说 clip，关节依旧归身体自己）
+    bodyWish: null,
+    wishSeq: 0,
     talking: 0,
     lastVoiceAt: 0,
     speechSeq: 0,
@@ -358,6 +380,11 @@ export function createBrain({ rig, servos, motors, drives, memory, world, spinal
     say(res.say);
     if (res.intent && res.intent !== 'idle' && state.goal?.type === 'idle') {
       startGoal(['create', 'wander', 'approach', 'observe', 'rest'].includes(res.intent) ? res.intent : 'idle');
+    }
+    // 身体：模型说「抬一下手」，身体就真的抬手 —— 但只需照做，不需要知道关节怎么算
+    if (res.body && res.body !== 'none' && BODY_CLIP[res.body]) {
+      state.bodyWish = { clip: BODY_CLIP[res.body], id: ++state.wishSeq, label: res.body, at: Date.now() };
+      log.push({ layer: 'cortex', motor: 'body', text: `大模型：让身体「${BODY_CN[res.body]}」` });
     }
     return res;
   }
