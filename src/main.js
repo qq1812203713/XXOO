@@ -203,14 +203,32 @@ function showBodyHint() {
 async function tryBoot3D() {
   if (body3d) return true;
   try {
-    const body = await create3DBody({
-      canvas: girl3dCanvas,
-      modelUrl: MODELS[modelKey].url,
-      onStatus: (msg) => {
-        const el = document.getElementById('ver');
-        if (el) el.dataset.status = msg;
-      },
-    });
+    const boot = (key) =>
+      create3DBody({
+        canvas: girl3dCanvas,
+        modelUrl: MODELS[key].url,
+        onStatus: (msg) => {
+          const el = document.getElementById('ver');
+          if (el) el.dataset.status = msg;
+        },
+      });
+    let body = null;
+    try {
+      body = await boot(modelKey);
+    } catch (err) {
+      // 存档里那具身体已经不在 vendor/ 了（比如换过名单）—— 别让她掉回 2D，换成默认那具重来
+      if (modelKey !== 'alicia') {
+        reportToServer(`建模 ${modelKey} 加载失败，换回默认：${err && err.message}`, 'model');
+        try {
+          globalThis.localStorage?.setItem(MODEL_KEY, 'alicia');
+        } catch {
+          /* ignore */
+        }
+        body = await boot('alicia');
+      } else {
+        throw err;
+      }
+    }
     if (!body) {
       // 这里以前是静默失败 —— 直接掉回 2D，谁也不知道为什么
       last3DFail = `hasWebGL=${hasWebGL() ? 'yes' : 'no'}`;
