@@ -159,6 +159,7 @@ async function bootBody() {
         if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
         girl3dCanvas?.classList.add('on');
         markAwake('3D 身体（VRM）');
+        setTimeout(startSnapshots, 900);
         log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
         return;
       }
@@ -260,6 +261,25 @@ function loop(now) {
     saveState();
   }
   requestAnimationFrame(loop);
+}
+
+// —— 自动留档：她加载完成后，隔几秒抓几帧传到服务器 ——
+// 这样“她到底长什么样、有没有在抽搐”能被我直接看到，而不是靠人描述。
+function startSnapshots() {
+  if (new URLSearchParams(location.search).get('shot') === '0') return;
+  let n = 0;
+  const timer = setInterval(() => {
+    n += 1;
+    const data = body3d?.snapshot?.();
+    if (data) {
+      fetch('./shot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag: `t${n}`, data }),
+      }).catch(() => {});
+    }
+    if (n >= 6) clearInterval(timer);
+  }, 1400);
 }
 
 // 开场前先把身体摆好，避免第一帧从“零姿势”弹出来

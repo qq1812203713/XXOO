@@ -110,7 +110,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   await loadThree();
   const { VRMLoaderPlugin, VRMUtils } = await import('../../vendor/three-vrm.module.js');
 
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    alpha: true,
+    antialias: true,
+    powerPreference: 'high-performance',
+    preserveDrawingBuffer: true, // 让画面能被抓下来（自己看，而不是让用户代劳）
+  });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearAlpha(0);
@@ -617,6 +623,22 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       }
       faceProbe = `手动 ${deg}°`;
       return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
+    },
+    // 抓一帧画面（缩小后转 jpeg），用来上传给服务器落盘检查
+    snapshot(maxW = 460) {
+      try {
+        const src = renderer.domElement;
+        const w = Math.min(maxW, src.width);
+        const h = Math.round((src.height / src.width) * w);
+        const c2 = document.createElement('canvas');
+        c2.width = w;
+        c2.height = h;
+        const ctx = c2.getContext('2d');
+        ctx.drawImage(src, 0, 0, w, h);
+        return c2.toDataURL('image/jpeg', 0.85);
+      } catch {
+        return '';
+      }
     },
     // 她的正面是否朝着相机：+1 正对，-1 背对
     facingCamera() {

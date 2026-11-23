@@ -122,6 +122,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 页面自己截图发回来，落盘到 shots/。
+  // 这样我不必再让用户“帮我截一张”，能直接看到屏幕上是什么。
+  if (rel === '/shot' && req.method === 'POST') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const body = Buffer.concat(chunks).toString('utf8');
+        const { data, tag } = JSON.parse(body);
+        const base64 = String(data || '').replace(/^data:image\/\w+;base64,/, '');
+        if (!base64) throw new Error('空图');
+        const dir = path.join(ROOT, 'shots');
+        fs.mkdirSync(dir, { recursive: true });
+        const name = `${String(tag || 'shot').replace(/[^\w.-]/g, '_')}-${Date.now()}.jpg`;
+        fs.writeFileSync(path.join(dir, name), Buffer.from(base64, 'base64'));
+        console.log(`shot saved: shots/${name} (${Math.round(base64.length / 1024)}KB)`);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, file: `shots/${name}` }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: false, error: String(err && err.message ? err.message : err) }));
+      }
+    });
+    return;
+  }
+
   // 当前构建号：页面拿它比较自己是不是旧版
   if (rel === '/version') {
     const out = JSON.stringify({ build: BUILD });
