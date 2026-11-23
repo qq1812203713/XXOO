@@ -13,6 +13,7 @@ import { createCortex } from './brain/cortex.js';
 import { createBrain } from './brain/brain.js';
 import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
+import { hasWebGL } from './render/gl.js';
 import { createAnimeBody } from './render/live2d.js';
 import { create3DBody } from './render/vrm.js';
 
@@ -160,49 +161,59 @@ function markAwake(label) {
   if (d && window.__booted) d.textContent = `已醒来 · ${label} · 点任意处进去`;
 }
 
+async function tryBoot3D() {
+  if (body3d) return true;
+  try {
+    const body = await create3DBody({
+      canvas: girl3dCanvas,
+      modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
+      onStatus: (msg) => {
+        const el = document.getElementById('ver');
+        if (el) el.dataset.status = msg;
+      },
+    });
+    if (!body) {
+      // 这里以前是静默失败 —— 直接掉回 2D，谁也不知道为什么
+      reportToServer(`3D 没起来：hasWebGL=${hasWebGL() ? 'yes' : 'no'}`, 'boot3d');
+      return false;
+    }
+    body3d = body;
+    document.getElementById('flip')?.addEventListener('click', () => {
+      const deg = body3d?.turnBody?.(180);
+      hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
+    });
+    if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
+    girlCanvas?.classList.remove('on'); // 3D 起来就把 2D / Live2D 那层彻底关掉
+    girl3dCanvas?.classList.add('on');
+    markAwake('3D 身体（VRM）');
+    setTimeout(startSnapshots, 900);
+    setTimeout(() => {
+      try {
+        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+      } catch (err) {
+        reportToServer(`state failed: ${err}`, 'state');
+      }
+    }, 2500);
+    setInterval(() => {
+      try {
+        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+      } catch {
+        /* ignore */
+      }
+    }, 6000);
+    log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
+    return true;
+  } catch (err) {
+    const msg = `3D：${err && err.stack ? err.stack : err}`;
+    bodyErrors.push(msg);
+    reportToServer(msg, 'boot3d');
+    return false;
+  }
+}
+
 async function bootBody() {
   if (bodyMode !== '2d' && bodyMode !== 'live2d') {
-    try {
-      body3d = await create3DBody({
-        canvas: girl3dCanvas,
-        modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
-        onStatus: (msg) => {
-          const el = document.getElementById('ver');
-          if (el) el.dataset.status = msg;
-        },
-      });
-      if (body3d) {
-        document.getElementById('flip')?.addEventListener('click', () => {
-          const deg = body3d?.turnBody?.(180);
-          hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
-        });
-        if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
-        girl3dCanvas?.classList.add('on');
-        markAwake('3D 身体（VRM）');
-        setTimeout(startSnapshots, 900);
-        setTimeout(() => {
-          try {
-            reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
-          } catch (err) {
-            reportToServer(`state failed: ${err}`, 'state');
-          }
-        }, 2500);
-        // 每 6 秒回传一次内部状态（在演哪段动作），我据此判断她到底有没有在动
-        setInterval(() => {
-          try {
-            reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
-          } catch {
-            /* ignore */
-          }
-        }, 6000);
-        log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
-        return;
-      }
-    } catch (err) {
-      const msg = `3D：${err && err.stack ? err.stack : err}`;
-      bodyErrors.push(msg);
-      reportToServer(msg, 'boot3d');
-    }
+    if (await tryBoot3D()) return;
   }
 
   if (bodyMode !== '2d') {
@@ -227,6 +238,23 @@ async function bootBody() {
 
   if (bodyErrors.length) {
     window.__report?.(`身体的 3D / Live2D 都没起来，继续用 2D 骨架：\n  ${bodyErrors.join('\n  ')}`);
+  }
+
+  // 手机上很常见：页面在后台/被遮住时 WebGL 拿不到上下文。所以等它回到前台、
+  // 或者用户碰一下，再试一次 3D —— 成功就自动把 2D 那层换掉，不需要人刷新。
+  if (!body3d) {
+    let retrying = false;
+    const retry = async () => {
+      if (body3d || retrying || document.hidden) return;
+      retrying = true;
+      const ok = await tryBoot3D();
+      retrying = false;
+      if (!ok) reportToServer('3D 重试后仍然没起来', 'boot3d');
+    };
+    document.addEventListener('visibilitychange', retry);
+    window.addEventListener('pointerdown', retry);
+    setTimeout(retry, 2500);
+    setTimeout(retry, 9000);
   }
 }
 

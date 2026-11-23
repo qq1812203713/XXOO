@@ -722,11 +722,10 @@ export function createRenderer(canvas) {
     ctx.fill();
 
     drawHair(pose, t, 'back');
-    drawNerves(bones);
+    // 不再把骨架画在皮肤外面：那看起来像解剖图。骨骼的实时状态在「神经」面板里看。
     drawHead(pose);
     drawFace(rig, pose, face, mood, t);
     drawHair(pose, t, 'front');
-    drawJoints(bones);
   }
 
   function drawRipples(brain) {
