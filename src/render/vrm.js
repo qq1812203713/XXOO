@@ -363,6 +363,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 平滑：每根骨真正写入的四元数会朝目标慢慢追上。
   // 数据层再抖，屏幕上也是连续的 —— 抽搐基本都出在这个环节。
   const SMOOTH = 14; // 每秒追上多少（越大越跟手）
+  let BAKING = false; // 烘焙关键帧时不做平滑
   const applied = new Map();
   const tmpQ = new Q();
   function writeLocal(name, targetWorldQ) {
@@ -372,7 +373,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const parentQ = pName ? (wq.get(pName) || restWorldQ.get(pName) || IDENT) : IDENT;
     const local = parentQ.clone().invert().multiply(targetWorldQ);
     const prev = applied.get(name);
-    const k = 1 - Math.exp(-SMOOTH * Math.max(dt || 0, 0.001));
+    const k = BAKING ? 1 : 1 - Math.exp(-SMOOTH * Math.max(dt || 0, 0.001));
     if (prev && k < 1) {
       prev.slerp(local, Math.min(1, k));
       b.quaternion.copy(prev);
@@ -423,11 +424,37 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return w.clone().multiply(rest[handName].q.clone().invert());
   };
 
-  const FORWARD = new V(0, 0, 1);
-  const BACK = new V(0, 0, -1);
+  // 相机移到 -Z 之后，她的“前方”就是 -Z。
+  // 这里的常量必须跟着改：否则肘是往背后折的，脚是朝后长的。
+  const FORWARD = new V(0, 0, -1);
+  const BACK = new V(0, 0, 1);
   const DOWN = new V(0, -1, 0);
 
   const lastDiag = {};
+  // 表情、眼动、整体位移 —— 与骨骼动画相互独立
+  function applyFace(brain, face, gx, gy) {
+    const f = face?.state || {};
+    const gazeX = gx ?? clamp((f.gazeX ?? 0) / 3, -1, 1);
+    const gazeY = gy ?? clamp((f.gazeY ?? 0) / 3, -1, 1);
+    for (const side of ['left', 'right']) {
+      const eye = node(`${side}Eye`);
+      if (eye) eye.rotation.set(-gazeY * 0.28, gazeX * 0.4, 0);
+    }
+    const em = vrm.expressionManager;
+    if (em) {
+      const blink = clamp((f.blink ?? 0) + (1 - clamp(f.eyeOpen ?? 1, 0, 1)) * 0.6, 0, 1);
+      em.setValue('blink', blink);
+      const talking = brain?.state?.talking > 0 ? 1 : 0;
+      const syllable = 0.5 + 0.5 * Math.sin(t * 18.7) * Math.sin(t * 4.3);
+      em.setValue('a', clamp(talking * syllable, 0, 1));
+      const mood = brain?.state?.mood || 'calm';
+      for (const [k, name] of Object.entries(EXPRESSIONS)) {
+        if (name) em.setValue(name, k === mood ? 0.75 : 0);
+      }
+    }
+    holder.position.x = clamp((brain?.state?.root?.x || 0) * 0.006, -0.35, 0.35);
+  }
+
   let dt = 0; // 当前帧时长，writeLocal 的平滑用
   function poseFromRig(brain, face, frameDt) {
     dt = frameDt;
@@ -580,28 +607,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       }
     }
 
-    // —— 眼睛：在头骨局部里转，真的会看你 ——
-    for (const side of ['left', 'right']) {
-      const eye = node(`${side}Eye`);
-      if (eye) eye.rotation.set(-gazeY * 0.28, gazeX * 0.4, 0);
-    }
-
-    // —— 表情 ——
-    const em = vrm.expressionManager;
-    if (em) {
-      const blink = clamp((f.blink ?? 0) + (1 - clamp(f.eyeOpen ?? 1, 0, 1)) * 0.6, 0, 1);
-      em.setValue('blink', blink);
-      const talking = brain.state.talking > 0 ? 1 : 0;
-      const syllable = 0.5 + 0.5 * Math.sin(t * 18.7) * Math.sin(t * 4.3);
-      em.setValue('a', clamp(talking * syllable, 0, 1));
-      for (const [k, name] of Object.entries(EXPRESSIONS)) {
-        if (name) em.setValue(name, k === mood ? 0.75 : 0);
-      }
-    }
-
-
-    // 她在世界里走动时，整个人跟着平移一点
-    holder.position.x = clamp((brain.state.root.x || 0) * 0.006, -0.35, 0.35);
+    applyFace(brain, face, gazeX, gazeY);
   }
 
   // 诊断：把「我要它朝哪」和「它实际朝哪」并排打出来。对不上就是重定向出了问题。
@@ -644,12 +650,222 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   let lastBrain = null;
   let lastFace = null;
+  // ————————————————————————————————————————————————————————————
+  // 标准做法：AnimationClip + AnimationMixer
+  // 参考 three-vrm 官方示例与社区通用实现，要点三条：
+  //   1. 关键帧写在 **normalized humanoid 骨骼的局部四元数** 上（不是世界四元数）；
+  //   2. 轨道名 `<节点名>.quaternion`，插值与混合全部交给 mixer 做 slerp；
+  //   3. 每帧顺序：mixer.update(dt) → vrm.update(dt) → render。
+  // 之前的做法是每帧直接算世界朝向再硬写局部四元数 —— 那等于绕过整个动画系统，
+  // 所以既没有过渡、又无法组合，看起来就僵。
+  // ————————————————————————————————————————————————————————————
+
+  const BONE_NAME = (bone) => `nrm_${bone}`; // 给 normalized 骨骼一个可绑定唯一名字
+
+  // 把“这一帧的姿势函数”烘焙成局部四元数快照
+  function bakePose(fn) {
+    wq.clear();
+    aq.clear();
+    lastTarget.clear();
+    applied.clear();
+    BAKING = true;
+    try {
+      fn();
+    } finally {
+      BAKING = false;
+    }
+    const snap = new Map();
+    for (const [bone, world] of wq) {
+      const p = PARENT.get(bone);
+      const parentWorld = p ? wq.get(p) || restWorldQ.get(p) || IDENT : IDENT;
+      snap.set(bone, parentWorld.clone().invert().multiply(world));
+    }
+    return snap;
+  }
+
+  function bakeClip(name, keys) {
+    const snaps = keys.map((k) => ({ t: k.t, snap: bakePose(k.fn) }));
+    const bones = new Set();
+    for (const s0 of snaps) for (const b of s0.snap.keys()) bones.add(b);
+    const tracks = [];
+    for (const bone of bones) {
+      const n = node(bone);
+      if (!n) continue;
+      n.name = BONE_NAME(bone);
+      const times = [];
+      const values = [];
+      for (const s0 of snaps) {
+        times.push(s0.t);
+        const q = s0.snap.get(bone) || new Q(); // 该帧没写 = 静止
+        values.push(q.x, q.y, q.z, q.w);
+      }
+      tracks.push(new THREE.QuaternionKeyframeTrack(`${n.name}.quaternion`, times, values));
+    }
+    return new THREE.AnimationClip(name, keys[keys.length - 1].t, tracks);
+  }
+
+  // 一具“站着”的身体：所有轨道都以它为底，差别只在参数
+  const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
+  function basePose(cfg = {}) {
+    const {
+      breath = 0,
+      sway = 0,
+      headYaw = 0,
+      headPitch = 0,
+      headRoll = 0,
+      armL = null,
+      armR = null,
+      elbow = 0.16,
+      hand = 0.08,
+    } = cfg;
+
+    turn('hips', { x: 0, y: sway * 0.05, z: sway * 0.022 });
+    turn('spine', { x: breath * 0.012, y: sway * 0.03, z: 0 });
+    turn('chest', { x: breath * 0.03, y: headYaw * 0.2, z: sway * 0.012 });
+    turn('upperChest', { x: breath * 0.02, y: headYaw * 0.16, z: 0 });
+    turn('neck', { x: headPitch * 0.3, y: headYaw * 0.3, z: headRoll * 0.3 });
+    turn('head', { x: headPitch * 0.6, y: headYaw * 0.62, z: headRoll * 0.6 });
+
+    for (const side of ['L', 'R']) {
+      const s = side === 'L' ? 'right' : 'left'; // 画面左 = 她的右手
+      const raw = (side === 'L' ? armL : armR) || ARM_HANG[side];
+      const dir = raw.clone().normalize();
+      const raise = clamp(1 + dir.y, 0, 1);
+
+      // 手臂抬起来时肩膀跟着抬 —— 胳膊要从肩胛骨长出来
+      const sRest = rest[`${s}Shoulder`]?.dir;
+      if (sRest) {
+        aim(`${s}Shoulder`, rotateAround(sRest, new V(0, 0, s === 'right' ? 1 : -1), 0.18 * raise));
+      }
+      aim(`${s}UpperArm`, dir);
+
+      // 肘：绕「上臂 × 前方」弯，永远往前弯；再给一个最小弯曲，别锁死
+      let axis = new V().crossVectors(dir, FORWARD);
+      if (axis.lengthSq() < 1e-6) axis = new V(1, 0, 0);
+      axis.normalize();
+      const flex = Math.max(elbow, 0.05 + 0.3 * raise);
+      const dirFore = rotateAround(dir, axis, flex);
+      aim(`${s}LowerArm`, dirFore);
+      aim(`${s}Hand`, rotateAround(dirFore, axis, hand));
+    }
+  }
+
+  const NEUTRAL = () => basePose({});
+
+  const CLIPS = {
+    // 站立待机：呼吸 + 重心左右 + 极慢的视线游移
+    idle: bakeClip('idle', [
+      { t: 0, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0 }) },
+      { t: 1.2, fn: () => basePose({ breath: 1, sway: 0.7, headYaw: 0.06, headRoll: 0.03 }) },
+      { t: 2.4, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0.02 }) },
+      { t: 3.6, fn: () => basePose({ breath: -1, sway: -0.7, headYaw: -0.07, headRoll: -0.03 }) },
+      { t: 4.8, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0 }) },
+    ]),
+    lookL: bakeClip('lookL', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.5, fn: () => basePose({ headYaw: 0.42, headPitch: -0.05, sway: 0.3 }) },
+      { t: 1.6, fn: () => basePose({ headYaw: 0.40, headPitch: -0.04, sway: 0.28 }) },
+      { t: 2.4, fn: NEUTRAL },
+    ]),
+    lookR: bakeClip('lookR', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.5, fn: () => basePose({ headYaw: -0.42, headPitch: -0.05, sway: -0.3 }) },
+      { t: 1.6, fn: () => basePose({ headYaw: -0.40, headPitch: -0.04, sway: -0.28 }) },
+      { t: 2.4, fn: NEUTRAL },
+    ]),
+    // 伸手：肩抬、肘弯、手朝前下方 —— 不再是横着的一根棍子
+    reachL: bakeClip('reachL', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, headPitch: 0.12, sway: 0.25 }) },
+      { t: 1.5, fn: () => basePose({ armL: new V(0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, headPitch: 0.14, sway: 0.3 }) },
+      { t: 2.3, fn: NEUTRAL },
+    ]),
+    reachR: bakeClip('reachR', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, headPitch: 0.12, sway: -0.25 }) },
+      { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, headPitch: 0.14, sway: -0.3 }) },
+      { t: 2.3, fn: NEUTRAL },
+    ]),
+    // 伸个懒腰
+    stretch: bakeClip('stretch', [
+      { t: 0, fn: NEUTRAL },
+      { t: 1.0, fn: () => basePose({ armL: new V(0.42, 0.86, -0.2), armR: new V(-0.42, 0.86, -0.2), elbow: 0.22, headPitch: -0.2, breath: 0.8 }) },
+      { t: 2.0, fn: () => basePose({ armL: new V(0.5, 0.8, -0.3), armR: new V(-0.5, 0.8, -0.3), elbow: 0.3, headPitch: -0.24, breath: 0.6 }) },
+      { t: 3.0, fn: NEUTRAL },
+    ]),
+  };
+
+  const mixer = new THREE.AnimationMixer(vrm.scene);
+  const actions = {};
+  for (const [name, clip] of Object.entries(CLIPS)) {
+    const a = mixer.clipAction(clip);
+    if (name === 'idle') {
+      a.setLoop(THREE.LoopRepeat, Infinity);
+      a.play();
+    } else {
+      a.setLoop(THREE.LoopOnce, 1);
+      a.clampWhenFinished = false;
+    }
+    actions[name] = a;
+  }
+  let current = 'idle';
+  let nextActAt = 2.5;
+  let actsPlayed = 0;
+
+  function playAction(name, fade = 0.55) {
+    const to = actions[name];
+    if (!to || name === current) return;
+    const from = actions[current];
+    to.reset();
+    to.setEffectiveWeight(1);
+    to.play();
+    if (from) to.crossFadeFrom(from, fade, false);
+    current = name;
+    actsPlayed++;
+  }
+
+  mixer.addEventListener('finished', (e) => {
+    if (e.action && e.action !== actions.idle) {
+      const from = e.action;
+      const idle = actions.idle;
+      idle.reset();
+      idle.setEffectiveWeight(1);
+      idle.play();
+      idle.crossFadeFrom(from, 0.5, false);
+      current = 'idle';
+    }
+  });
+
+  // 她自己决定什么时候做点什么 —— 不是每帧算出来的，是“一段一段的动作”
+  function direct(brain) {
+    if (current !== 'idle') return;
+    if (t < nextActAt) return;
+    const r = Math.random();
+    if (r < 0.34) playAction(r < 0.17 ? 'lookL' : 'lookR');
+    else if (r < 0.6) playAction(r < 0.47 ? 'reachL' : 'reachR');
+    else if (r < 0.74) playAction('stretch');
+    else playAction(r < 0.87 ? 'lookL' : 'lookR');
+    nextActAt = t + 3 + Math.random() * 4.5;
+  }
+
+
+  const LEGACY = new URLSearchParams(globalThis.location?.search || '').get('anim') === 'legacy';
 
   function sync(brain, face, dt) {
     lastBrain = brain;
     lastFace = face;
-    poseFromRig(brain, face, dt);
-    vrm.update(Math.min(dt || clock.getDelta(), 0.05));
+    const step = Math.min(dt || clock.getDelta(), 0.05);
+    t += step;
+    if (LEGACY) {
+      poseFromRig(brain, face, step);
+    } else {
+      direct(brain); // 她自己挑一段动作
+      mixer.update(step); // 标准插值 / 混合
+      lastDiag.poseSize = 'mixer';
+      lastDiag.clip = current;
+      applyFace(brain, face);
+    }
+    vrm.update(step);
     renderer.render(scene, camera);
     ready = true;
   }
@@ -712,6 +928,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       };
       return {
         springOn,
+        mode: LEGACY ? 'legacy' : 'mixer',
+        clip: lastDiag.clip,
+        played: actsPlayed,
         poseSize: lastDiag.poseSize,
         armA: lastDiag.armA === undefined ? null : +lastDiag.armA.toFixed(3),
         arms: { L: deg('armLA'), R: deg('armRA'), foreL: deg('foreLA'), foreR: deg('foreRA'), handL: deg('handLA'), handR: deg('handRA') },
