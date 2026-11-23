@@ -265,6 +265,24 @@ let frameN = 0;
 let last = performance.now();
 let lastSave = performance.now();
 
+// —— 自动留档：加载完成后隔几秒抓几帧传回服务器，我能直接看到画面 ——
+function startSnapshots() {
+  if (new URLSearchParams(location.search).get('shot') === '0') return;
+  let n = 0;
+  const timer = setInterval(() => {
+    n += 1;
+    const data = body3d?.snapshot?.();
+    if (data) {
+      fetch('./shot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag: `t${n}-${body3d?.springOn ? 'spring' : 'rigid'}`, data }),
+      }).catch(() => {});
+    }
+    if (n >= 6) clearInterval(timer);
+  }, 1400);
+}
+
 // 一帧的全部工作。抽出来是为了给“看门狗”复用。
 let lastFrameAt = performance.now();
 function step(dt) {
