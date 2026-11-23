@@ -14,6 +14,7 @@ import { createBrain } from './brain/brain.js';
 import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
 import { createAnimeBody } from './render/live2d.js';
+import { create3DBody } from './render/vrm.js';
 
 // 任何未捕获的错误都直接写在屏幕上，而不是留一个黑屏让人猜
 function showFatal(message) {
@@ -119,41 +120,79 @@ function handleAway(ms) {
 
 if (saved.lastSeen) handleAway(Date.now() - saved.lastSeen);
 
-// —— 二次元身体（Live2D）——
-// 不阻塞主循环：文件大、要 WebGL，允许它慢慢来。成功了就把 2D 身体换掉，
-// 失败了就安静地继续用 2D 身体，屏幕上不会多出任何东西。
-let anime = null;
+// —— 身体：3D VRM 优先，Live2D 次之，最后退回 2D 骨架 ——
+// 加载慢、要 WebGL，所以不阻塞主循环；失败就顺着往下退，屏幕上不留白。
+let anime = null; // Live2D
+let body3d = null; // VRM
 const girlCanvas = document.getElementById('girl');
-createAnimeBody({
-  canvas: girlCanvas,
-  modelUrl: './vendor/model/haru/haru_greeter_t03.model3.json',
-})
-  .then((body) => {
-    if (!body) return;
-    anime = body;
-    // 渲染器若是旧版（module 缓存混用），宁可退回 2D 也不要两具身体叠在一起
-    if (typeof renderer.setBodyVisible !== 'function') throw new Error('渲染器版本不一致，请强制刷新一次');
-    girlCanvas?.classList.add('on');
-    const d = document.getElementById('intro-diag');
-    if (d && window.__booted) d.textContent = '已醒来 · Live2D 模型 · 点任意处进去';
-    log.push({ layer: 'render', motor: 'body', text: '换上了 Live2D 模型（Haru）。' });
-  })
-  .catch((err) => {
-    window.__report?.(`Live2D 没起来，继续用 2D 身体：${err && err.message ? err.message : err}`);
-  });
+const girl3dCanvas = document.getElementById('girl3d');
+const bodyMode = (() => {
+  try {
+    return new URLSearchParams(location.search).get('body'); // ?body=2d|live2d|vrm
+  } catch {
+    return null;
+  }
+})();
+const bodyErrors = [];
+
+function markAwake(label) {
+  const d = document.getElementById('intro-diag');
+  if (d && window.__booted) d.textContent = `已醒来 · ${label} · 点任意处进去`;
+}
+
+async function bootBody() {
+  if (bodyMode !== '2d' && bodyMode !== 'live2d') {
+    try {
+      body3d = await create3DBody({
+        canvas: girl3dCanvas,
+        modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
+      });
+      if (body3d) {
+        if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
+        girl3dCanvas?.classList.add('on');
+        markAwake('3D 身体（VRM）');
+        log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
+        return;
+      }
+    } catch (err) {
+      bodyErrors.push(`3D：${err && err.message ? err.message : err}`);
+    }
+  }
+
+  if (bodyMode !== '2d') {
+    try {
+      anime = await createAnimeBody({
+        canvas: girlCanvas,
+        modelUrl: './vendor/model/haru/haru_greeter_t03.model3.json',
+      });
+      if (anime) {
+        if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
+        girlCanvas?.classList.add('on');
+        markAwake('Live2D 模型');
+        log.push({ layer: 'render', motor: 'body', text: '换上了 Live2D 模型（Haru）。' });
+        return;
+      }
+    } catch (err) {
+      bodyErrors.push(`Live2D：${err && err.message ? err.message : err}`);
+    }
+  }
+
+  if (bodyErrors.length) {
+    window.__report?.(`身体的 3D / Live2D 都没起来，继续用 2D 骨架：\n  ${bodyErrors.join('\n  ')}`);
+  }
+}
+
+bootBody();
 
 // —— 窗口 ——
 let visibleAt = Date.now();
-window.addEventListener('resize', () => {
+function resizeAll() {
   renderer.resize();
   anime?.resize();
-});
-window.addEventListener('orientationchange', () =>
-  setTimeout(() => {
-    renderer.resize();
-    anime?.resize();
-  }, 180),
-);
+  body3d?.resize();
+}
+window.addEventListener('resize', resizeAll);
+window.addEventListener('orientationchange', () => setTimeout(resizeAll, 180));
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     visibleAt = Date.now();
@@ -180,7 +219,8 @@ function loop(now) {
 
   try {
     brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
-    if (anime) anime.sync(brain, motors.parts.face, dt);
+    if (body3d) body3d.sync(brain, motors.parts.face, dt);
+    else if (anime) anime.sync(brain, motors.parts.face, dt);
     renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
     ui.frame(dt, Date.now());
   } catch (err) {

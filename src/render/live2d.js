@@ -8,18 +8,9 @@
 // 主程序会安静地退回到原来那具 2D 身体，不会白屏。
 
 import { createBinder } from './bind.js';
+import { hasWebGL } from './gl.js';
 
 const VENDOR = './vendor/';
-
-function hasWebGL() {
-  try {
-    const c = document.createElement('canvas');
-    const gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
-    return !!(gl && typeof gl.createTexture === 'function' && typeof gl.createBuffer === 'function');
-  } catch {
-    return false;
-  }
-}
 
 function loadScript(src, timeout = 15000) {
   return new Promise((resolve, reject) => {

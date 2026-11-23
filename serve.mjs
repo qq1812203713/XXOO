@@ -18,7 +18,11 @@ const BUILD = Date.now().toString(36);
 const IMPORT_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])(\.{1,2}\/[^'"]+?\.m?js)\2/g;
 
 function bustImports(src) {
-  return src.replace(IMPORT_RE, (m, head, q, spec) => `${head}${q}${spec}?b=${BUILD}${q}`);
+  return src.replace(IMPORT_RE, (m, head, q, spec) => {
+    // vendor/ 里的第三方库互相引用时不能加查询串，否则 three 会被加载成两份实例
+    if (spec.includes('/vendor/')) return m;
+    return `${head}${q}${spec}?b=${BUILD}${q}`;
+  });
 }
 
 const MIME = {

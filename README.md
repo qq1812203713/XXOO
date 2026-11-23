@@ -34,7 +34,46 @@ npm run visual     # 用 @napi-rs/canvas 在 Node 里渲染并截图到 test/sho
 
 她的一切（包括 API Key）都只存在这台设备的 `localStorage` 里。
 
-## 她的样子：Live2D
+## 她的样子：3D 身体（VRM）
+
+默认加载的是 **VRM 3D 模型**：`vendor/model/alicia/AliciaSolid.vrm`（Alicia Solid，由 DWANGO 制作）。
+它不是 Live2D 那种半身立绘，而是一具完整的 3D 人形——**55 根 humanoid 骨骼，其中 30 根是手指**
+（5 指 × 3 节 × 2 手）。所以「每根手指一个 motor」这件事，终于能在画面上看见了。
+
+渲染是 three.js + `@pixiv/three-vrm`，全部 vendored 在 `vendor/` 里，不联网。
+
+### 重定向：骨架 → 3D 骨骼
+
+| 我们的关节 | VRM 骨骼 | 换算 |
+| --- | --- | --- |
+| `pelvis` / `spine1` / `chest` | `hips` `spine` `chest` `upperChest` | 逐段角度 → `rotation.z`（符号翻转） |
+| `neck` / `head` | `neck` `head` | 倾角 → Z，视线 → Y/X |
+| `arm_L_upper.a` | `leftUpperArm` | T-pose 指 +X，故 `φ = π/2 − a` |
+| `arm_R_upper.a` | `rightUpperArm` | 指 −X，故 `φ = −π/2 − a` |
+| `arm_*_fore.a − arm_*_upper.a` | `left/rightLowerArm` | 屈肘 = 相对角 |
+| `hand_*` | `left/rightHand` | 腕部相对角 |
+| `L_index_0..2` | `leftIndexProximal/Intermediate/Distal` | **逐节**，2D 局部角 → 绕 Z 卷曲 |
+| `L_thumb_0..1` | `leftThumbProximal/Intermediate/Distal` | 拇指只有两节，末端借用第二节 ×0.7 |
+| `leg_*_thigh` / `_shin` / `foot_*` | `UpperLeg` / `LowerLeg` / `Foot` | 膝在矢状面，故绕 X |
+| 五根脚趾平均 | `left/rightToes` | 模型只有一根脚趾骨，只能整体压 |
+| `face.gazeX/Y` | `leftEye` `rightEye` | 眼球真的会转向你 |
+| 说话 / 眨眼 / 情绪 | blendShape `a` `blink` `joy` `sorrow` `fun` `angry` | — |
+
+### 三级降级
+
+```
+3D VRM  ──失败──▶  Live2D  ──失败──▶  原 2D 骨架
+```
+
+也可以用 URL 参数强制指定：`?body=vrm` / `?body=live2d` / `?body=2d`。
+
+### 许可（必须说清楚）
+
+Alicia Solid © DWANGO Co., Ltd.，VRM 元数据里标注 `licenseName: Other`。
+**仅适用于个人学习/评估，不能商用、不能二次分发模型文件。**
+真要上线，请换成自有模型或购买授权的 VRM。
+
+## 她的样子：Live2D（备用）
 
 画面里那具身体现在是一个真正的二次元模型 —— **Haru**（Live2D 官方 Cubism 4 示例模型，2048 贴图），
 连同 Cubism Core 4.2.2、PIXI 6、`pixi-live2d-display` 一起放在 `vendor/` 里，**全部本地、不联网、不依赖 CDN**。

@@ -70,6 +70,23 @@ input {
   opacity: 1;
 }
 
+/* 3D 身体（VRM）：同一层，透明，不吃事件 */
+#girl3d {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+}
+
+#girl3d.on {
+  opacity: 1;
+}
+
 /* ————— 顶部 ————— */
 .hud {
   position: fixed;
