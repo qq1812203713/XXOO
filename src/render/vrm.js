@@ -473,76 +473,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     /* 头发偏移失败不影响别的 */
   }
 
-  // ————————————————— 身体轮廓 —————————————————
-  // 每具建模的横截面差很多：大裙摆的锥面会把手腕整根吞掉，看起来就像「手臂插进身体」。
-  // 载入时量一次躯干（不含头发/耳机）的横向半宽，据此决定手臂是贴在体侧，还是落到身前。
-  const BODY_R = { chestX: 0, skirtX: 0, handX: 0, fwd: 0, out: 0 };
-  try {
-    const hipsO = rest.hips;
-    const chestO = rest.chest || rest.chestUpper || rest.upperChest || rest.spine;
-    if (hipsO && chestO) {
-      const cx = hipsO.pos.x;
-      const skirtLo = hipsO.pos.y - 0.13;
-      const skirtHi = hipsO.pos.y + 0.04;
-      const chestLo = chestO.pos.y + 0.01;
-      const chestHi = chestO.pos.y + 0.14;
-      const p = new THREE.Vector3();
-      let skirtX = 0;
-      let chestX = 0;
-      scene.traverse((o) => {
-        if (!o.isMesh || !o.geometry?.attributes?.position) return;
-        const nm = (o.name || '').toLowerCase();
-        if (/hair|eye|face|headphone|ear|brow|teeth|tongue/.test(nm)) return;
-        const pos = o.geometry.attributes.position;
-        const step = Math.max(1, Math.floor(pos.count / 30000));
-        for (let i = 0; i < pos.count; i += step) {
-          p.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
-          if (p.y < skirtLo || p.y > chestHi) continue;
-          const dx = Math.abs(p.x - cx);
-          if (p.y <= skirtHi) skirtX = Math.max(skirtX, dx);
-          else if (p.y >= chestLo) chestX = Math.max(chestX, dx);
-        }
-      });
-      BODY_R.skirtX = skirtX;
-      BODY_R.chestX = chestX;
-      // 手掌自然下垂时会落在哪一侧
-      const sh = rest.leftUpperArm || rest.rightUpperArm;
-      const shoulderX = sh ? Math.abs(sh.pos.x - cx) : 0.17;
-      const armLen = (rest.leftLowerArm ? rest.leftLowerArm.pos.distanceTo(rest.leftHand?.pos || rest.leftLowerArm.pos) : 0.2) + 0.2;
-      BODY_R.handX = shoulderX + armLen * 0.16; // 与 ARM_HANG 的 x 分量对应
-      // 需要往前挪多少：裙子/胸比手还宽，就把整条胳膊送到身前（真人穿大摆裙就是这么站）
-      const need = Math.max(skirtX, chestX * 0.92) + 0.015 - BODY_R.handX;
-      // 差多少就分一半往前、一半往外：纯往前会变成「捂着肚子」，纯往外又像摊开双臂。
-      BODY_R.fwd = clamp(need / 0.55, 0, 0.30);
-      BODY_R.out = clamp(need * 0.6, 0, 0.10);
-    }
-  } catch {
-    /* 量不出来就用手臂默认姿态 */
-  }
-
-  // ?hide=cloth|dress|boots（逗号分隔正则）：临时藏掉某几层网格，方便核对「衣服下面是什么」
-  try {
-    const qp = new URLSearchParams(globalThis.location?.search || '');
-    const fp = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
-    let saved = '';
-    try {
-      saved = globalThis.localStorage?.getItem('xxoo.hide') || '';
-    } catch {
-      /* 隐私模式 */
-    }
-    const hide = qp.get('hide') || fp.get('hide') || saved;
-    if (hide) {
-      const res = hide.split(',').filter(Boolean).map((t) => new RegExp(t, 'i'));
-      vrm.scene.traverse((o) => {
-        if (!o.isMesh) return;
-        const nm = o.name || '';
-        if (res.some((r) => r.test(nm))) o.visible = false;
-      });
-    }
-  } catch {
-    /* 只是自检用 */
-  }
-
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const size = box.getSize(new V());
   const height = size.y || 1.55;
@@ -1249,12 +1179,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
-  // 手臂自然下垂：体侧 + 略向前。向前多少由载入时量到的裙摆/胸宽决定（BODY_R.fwd），
-  // 裙子越宽、手越往身前落 —— 既不插进模型，也不会像在摊开双臂。
-  const ARM_HANG = {
-    L: new V(0.16 + BODY_R.out, -0.96, 0.06 + BODY_R.fwd).normalize(),
-    R: new V(-(0.16 + BODY_R.out), -0.96, 0.06 + BODY_R.fwd).normalize(),
-  };
+  // 手臂自然下垂。这组数值是前几版调对的那一组，别再动 ——
+  // 手臂看着别扭时，先怀疑肩/肘/腕的旋转轴，不要改这里。
+  const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
   function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = 0) {
     const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'L' : 'R']).clone().normalize();
     const raise = clamp(1 + dir.y, 0, 1);
@@ -1909,7 +1836,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       };
       return {
         springOn,
-        bodyR: { chestX: +BODY_R.chestX.toFixed(3), skirtX: +BODY_R.skirtX.toFixed(3), fwd: +BODY_R.fwd.toFixed(2) },
         stance: +STANCE.toFixed(3),
         legScale: +LEG_SCALE.toFixed(2),
         legs: (() => {
