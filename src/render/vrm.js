@@ -589,7 +589,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   const clock = new THREE.Clock();
 
+  let lastBrain = null;
+  let lastFace = null;
+
   function sync(brain, face, dt) {
+    lastBrain = brain;
+    lastFace = face;
     poseFromRig(brain, face, dt);
     vrm.update(Math.min(dt || clock.getDelta(), 0.05));
     renderer.render(scene, camera);
@@ -663,6 +668,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     // 抓一帧画面（缩小后转 jpeg），用来上传给服务器落盘检查
     snapshot(maxW = 460) {
       try {
+        // 后台标签页里 rAF 会停，画布上留的是几千帧前的旧图。
+        // 截图前强制推一帧，拍到的才是“现在”。
+        if (lastBrain) {
+          poseFromRig(lastBrain, lastFace, 1 / 60);
+          vrm.update(1 / 60);
+          renderer.render(scene, camera);
+        }
         const src = renderer.domElement;
         const w = Math.min(maxW, src.width);
         const h = Math.round((src.height / src.width) * w);
