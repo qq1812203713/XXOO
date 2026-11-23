@@ -905,10 +905,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
   const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
   function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = 0) {
-    const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'R' : 'L']).clone().normalize();
+    const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'L' : 'R']).clone().normalize();
     const raise = clamp(1 + dir.y, 0, 1);
     const sRest = rest[`${bs}Shoulder`]?.dir;
-    if (sRest) aim(`${bs}Shoulder`, rotateAround(sRest, Y_AXIS, (bs === 'right' ? 1 : -1) * 0.18 * raise));
+    // 肩胛骨：胳膊抬起来时跟着抬一点（绕 Z 轴才是“抬”，绕 Y 是“转”）
+    if (sRest) aim(`${bs}Shoulder`, rotateAround(sRest, Z_AXIS, (bs === 'right' ? -1 : 1) * 0.18 * raise));
     aim(`${bs}UpperArm`, dir);
     let axis = new V().crossVectors(dir, FORWARD);
     if (axis.lengthSq() < 1e-6) axis = X_AXIS.clone();
@@ -967,7 +968,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     gaitLeg('left', p % 1);
     gaitLeg('right', (p + 0.5) % 1);
     // 手臂与同侧的腿反向摆
-    const swingDir = (bs) => rotateAround(ARM_HANG[bs === 'right' ? 'R' : 'L'], X_AXIS, s2 * 0.42 * (bs === 'right' ? 1 : -1));
+    const swingDir = (bs) => rotateAround(ARM_HANG[bs === 'right' ? 'L' : 'R'], X_AXIS, s2 * 0.42 * (bs === 'right' ? 1 : -1));
     poseArm('right', swingDir('right'), 0.3, 0.12, 0.25);
     poseArm('left', swingDir('left'), 0.3, 0.12, 0.25);
   }
