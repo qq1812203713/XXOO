@@ -285,7 +285,7 @@ function hudNote(msg) {
   const paint = () => {
     const e = document.getElementById('ver');
     if (!e) return;
-    const base = `#${String(BUILD).slice(-4)}`;
+    const base = `v${document.querySelector('meta[name="version"]')?.content || '?'}`;
     let f = NaN;
     try {
       f = body3d?.facingDeg?.() ?? NaN;
