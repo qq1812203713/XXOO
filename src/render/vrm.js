@@ -1205,6 +1205,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const nervePrev = new Map();
   const tmpQ2 = new Q();
   const tmpV2 = new V();
+  const handNow = new Q();
   const FINGER_NAMES = ['ThumbMetacarpal', 'ThumbProximal', 'ThumbIntermediate', 'ThumbDistal', 'IndexProximal', 'IndexIntermediate', 'IndexDistal', 'MiddleProximal', 'MiddleIntermediate', 'MiddleDistal', 'RingProximal', 'RingIntermediate', 'RingDistal', 'LittleProximal', 'LittleIntermediate', 'LittleDistal'];
 
   function nerveFrame() {
@@ -1234,13 +1235,19 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     for (const side of ['left', 'right']) {
       for (const f of ['Thumb', 'Index', 'Middle', 'Ring', 'Little']) {
         const segs = [];
+        // 弯多少 = 相对“手掌”的转角变化（直接拿世界转角会把整条胳膊的姿势算进去）
+        const handName = `${side}Hand`;
+        const handNode = node(handName);
+        if (handNode) handNode.getWorldQuaternion(handNow);
         for (const seg of FINGER_NAMES.filter((n) => n.startsWith(f))) {
           const name = `${side}${seg}`;
           const b = node(name);
           const r = rest[name];
-          if (!b || !r) continue;
+          if (!b || !r || !handNode || !rest[handName]) continue;
           b.getWorldQuaternion(tmpQ2);
-          const bend = 2 * Math.acos(Math.min(1, Math.abs(tmpQ2.dot(r.q))));
+          const rel = handNow.clone().invert().multiply(tmpQ2);
+          const relRest = rest[handName].q.clone().invert().multiply(r.q);
+          const bend = 2 * Math.acos(Math.min(1, Math.abs(rel.dot(relRest))));
           segs.push({ n: name, bend: (bend * 180) / Math.PI });
         }
         if (!segs.length) continue;

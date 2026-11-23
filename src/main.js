@@ -290,7 +290,7 @@ function startSnapshots() {
         body: JSON.stringify({ tag: `t${n}-${body3d?.springOn ? 'spring' : 'rigid'}`, data }),
       }).catch(() => {});
     }
-    if (n >= 6) clearInterval(timer);
+    // 不再拍六张就停：我要能一直看到她在干什么
   }, every);
 }
 

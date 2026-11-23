@@ -105,6 +105,13 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
 
   // ————— 面板开关 —————
   let nerveTab = { side: 'L', part: 'body' };
+
+  // 自检：把神经面板自己截下来回传，这样我能直接看到它长什么样
+  const FLAGS = globalThis.__XXOO_FLAGS__ || '';
+  const NERVE_SHOT = /nerveshot/.test(FLAGS);
+  const tabFlag = /ntab=([LR]):(hand|foot|body)/.exec(FLAGS);
+  if (tabFlag) nerveTab = { side: tabFlag[1], part: tabFlag[2] };
+  let lastNerveShot = 0;
   let heroTabBound = false;
 
   function openNerves(open) {
@@ -136,6 +143,7 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   }
 
   $('open-nerves').addEventListener('click', () => openNerves(refs.nerves.hidden));
+  if (/nerves(=|&|$)/.test(FLAGS)) openNerves(true);
   $('open-settings').addEventListener('click', () => openSettings(true));
   for (const btn of document.querySelectorAll('[data-close]')) {
     btn.addEventListener('click', () => {
@@ -442,8 +450,11 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
       minY = Math.min(minY, py);
       maxY = Math.max(maxY, py);
     }
-    const pad = 16;
-    const s = Math.min((w - pad * 2) / Math.max(1e-3, maxX - minX), (h - pad * 2) / Math.max(1e-3, maxY - minY));
+    // 留出轮廓（头是圆、鞋有厚度）的余量，否则头顶和脚底会被切掉
+    const spanX = Math.max(1e-3, maxX - minX);
+    const spanY = Math.max(1e-3, maxY - minY);
+    const pad = 14;
+    const s = Math.min((w - pad * 2) / (spanX * 1.22), (h - pad * 2) / (spanY * 1.16));
     const ox = w / 2 - ((minX + maxX) / 2) * s;
     const oy = h / 2 - ((minY + maxY) / 2) * s;
     const X = (b) => -b.x * s + ox;
@@ -452,12 +463,72 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     g2.save();
     g2.lineCap = 'round';
 
+    const head = byName.get('head');
+    const neck = byName.get('neck');
+    const ls = byName.get('leftShoulder');
+    const rs = byName.get('rightShoulder');
+    const lu = byName.get('leftUpperLeg');
+    const ru = byName.get('rightUpperLeg');
+    const bodyH = Math.abs((head ? Y(head) : 0) - (lu ? Y(lu) : h));
+
+    // —— 一层很淡的“身体”：光有线条太像示意图，加个轮廓才认得出是她 ——
+    if (head) {
+      g2.beginPath();
+      g2.ellipse(X(head), Y(head) - bodyH * 0.06, bodyH * 0.11, bodyH * 0.13, 0, 0, Math.PI * 2);
+      g2.fillStyle = 'rgba(255,214,232,0.10)';
+      g2.fill();
+      g2.strokeStyle = 'rgba(255,214,232,0.28)';
+      g2.lineWidth = 1.2;
+      g2.stroke();
+    }
+    if (ls && rs && lu && ru && neck) {
+      g2.beginPath();
+      g2.moveTo(X(ls), Y(ls));
+      g2.lineTo(X(neck), Y(neck));
+      g2.lineTo(X(rs), Y(rs));
+      g2.lineTo(X(ru), Y(ru));
+      g2.lineTo(X(lu), Y(lu));
+      g2.closePath();
+      const grd = g2.createLinearGradient(0, Y(head || neck), 0, Y(lu));
+      grd.addColorStop(0, 'rgba(255,200,225,0.13)');
+      grd.addColorStop(1, 'rgba(150,190,255,0.07)');
+      g2.fillStyle = grd;
+      g2.fill();
+      g2.strokeStyle = 'rgba(255,206,230,0.22)';
+      g2.lineWidth = 1;
+      g2.stroke();
+    }
+    // 四肢：先铺一条粗的暗色，再叠亮线，看起来才有体积
+    const limbs = [
+      ['leftShoulder', 'leftUpperArm'],
+      ['leftUpperArm', 'leftLowerArm'],
+      ['leftLowerArm', 'leftHand'],
+      ['rightShoulder', 'rightUpperArm'],
+      ['rightUpperArm', 'rightLowerArm'],
+      ['rightLowerArm', 'rightHand'],
+      ['leftUpperLeg', 'leftLowerLeg'],
+      ['leftLowerLeg', 'leftFoot'],
+      ['rightUpperLeg', 'rightLowerLeg'],
+      ['rightLowerLeg', 'rightFoot'],
+    ];
+    for (const [a, b] of limbs) {
+      const A = byName.get(a);
+      const B = byName.get(b);
+      if (!A || !B) continue;
+      g2.strokeStyle = 'rgba(60,40,70,0.55)';
+      g2.lineWidth = 7;
+      g2.beginPath();
+      g2.moveTo(X(A), Y(A));
+      g2.lineTo(X(B), Y(B));
+      g2.stroke();
+    }
+
     // 骨：热度越高越亮
     const link = (a, b) => {
       if (!a || !b) return;
       const heat = Math.max(a.a, b.a);
-      g2.strokeStyle = heat > 0.08 ? `rgba(120,240,255,${0.12 + heat * 0.55})` : 'rgba(255,196,224,0.16)';
-      g2.lineWidth = 2 + heat * 3;
+      g2.strokeStyle = heat > 0.08 ? `rgba(120,240,255,${0.14 + heat * 0.6})` : 'rgba(255,196,224,0.2)';
+      g2.lineWidth = 1.6 + heat * 3;
       g2.beginPath();
       g2.moveTo(X(a), Y(a));
       g2.lineTo(X(b), Y(b));
@@ -469,25 +540,41 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
 
     // 关节
     for (const b of byName.values()) {
-      const r = 2.2 + b.a * 2.4;
+      const r = 2.2 + b.a * 2.6;
       g2.beginPath();
       g2.arc(X(b), Y(b), r, 0, Math.PI * 2);
-      g2.fillStyle = b.a > 0.06 ? `rgba(140,245,255,${0.45 + b.a * 0.55})` : 'rgba(255,206,230,0.55)';
+      g2.fillStyle = b.a > 0.06 ? `rgba(140,245,255,${0.5 + b.a * 0.5})` : 'rgba(255,206,230,0.6)';
       g2.fill();
+      if (b.a > 0.25) {
+        g2.beginPath();
+        g2.arc(X(b), Y(b), r + 3.5, 0, Math.PI * 2);
+        g2.strokeStyle = `rgba(140,245,255,${0.25 * b.a})`;
+        g2.lineWidth = 1.4;
+        g2.stroke();
+      }
     }
 
-    // 手：把每根手指现在的弯曲角度标出来（真数字）
+    // 手：每根手指现在的真实弯曲角度，排成一列，别糊在一起
     if (isHand && f.fingers) {
-      g2.font = '10px ui-sans-serif, system-ui, sans-serif';
+      const list = f.fingers.filter((x) => x.side === nerveTab.side);
+      g2.font = '10.5px ui-sans-serif, system-ui, sans-serif';
       g2.textBaseline = 'middle';
-      let row = 0;
-      for (const fg of f.fingers.filter((x) => x.side === nerveTab.side)) {
-        const tip = byName.get(fg.segs[fg.segs.length - 1].n);
-        if (!tip) continue;
-        g2.fillStyle = fg.maxBend > 40 ? 'rgba(140,245,255,0.95)' : 'rgba(255,206,230,0.7)';
-        g2.fillText(`${FINGER_CN[fg.finger] || fg.finger} ${fg.maxBend.toFixed(0)}°`, X(tip) + 8, Y(tip) + row * 0);
-        row += 1;
-      }
+      list.forEach((fg, i) => {
+        const y0 = 18 + i * 13;
+        const bend = fg.maxBend;
+        g2.fillStyle = bend > 45 ? 'rgba(140,245,255,0.95)' : bend > 12 ? 'rgba(190,230,255,0.8)' : 'rgba(255,206,230,0.62)';
+        g2.fillText(`${FINGER_CN[fg.finger] || fg.finger}`, 10, y0);
+        g2.textAlign = 'right';
+        g2.fillText(`${bend.toFixed(0)}°`, 96, y0);
+        g2.textAlign = 'left';
+        // 一根小横条：长度就是弯曲程度
+        g2.fillStyle = 'rgba(255,255,255,0.10)';
+        g2.fillRect(104, y0 - 2, 54, 4);
+        g2.fillStyle = bend > 45 ? 'rgba(140,245,255,0.9)' : 'rgba(255,180,214,0.7)';
+        g2.fillRect(104, y0 - 2, Math.min(54, (bend / 120) * 54), 4);
+      });
+      g2.fillStyle = 'rgba(255,214,232,0.55)';
+      g2.fillText('握力 = 各节指骨相对手掌的转角', 10, 18 + list.length * 13 + 4);
     }
     g2.restore();
 
@@ -495,7 +582,8 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     g2.font = '11px ui-sans-serif, system-ui, sans-serif';
     g2.fillStyle = 'rgba(255,214,232,0.8)';
     g2.textAlign = 'right';
-    g2.fillText(`${CLIP_LABEL[f.clip] || f.clip} · ${f.bones.length} 根骨`, w - 8, h - 8);
+    const steps = Math.max(0, Math.round(f.walked / 0.26));
+    g2.fillText(`${CLIP_LABEL[f.clip] || f.clip} · ${f.bones.length} 根骨 · ${steps} 步`, w - 8, h - 8);
     g2.textAlign = 'left';
   }
 
@@ -516,6 +604,14 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     const frame = body?.nerveFrame?.();
     if (frame) {
       drawNerve(g2, frame, rect.width, rect.height);
+      if (NERVE_SHOT && performance.now() - lastNerveShot > 1200) {
+        lastNerveShot = performance.now();
+        fetch('./shot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag: 'nerve', data: c.toDataURL('image/jpeg', 0.9) }),
+        }).catch(() => {});
+      }
       return;
     }
     // 没有 3D 身体（Live2D / 2D）时退回骨骼示意图

@@ -157,6 +157,16 @@ const server = http.createServer((req, res) => {
         const name = `${String(tag || 'shot').replace(/[^\w.-]/g, '_')}-${Date.now()}.jpg`;
         fs.writeFileSync(path.join(dir, name), Buffer.from(base64, 'base64'));
         console.log(`shot saved: shots/${name} (${Math.round(base64.length / 1024)}KB)`);
+        // 只留最近 80 张，免得来回堆
+        try {
+          const files = fs
+            .readdirSync(dir)
+            .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+            .sort((a, b) => b.t - a.t);
+          for (const old of files.slice(80)) fs.unlinkSync(path.join(dir, old.f));
+        } catch {
+          /* ignore */
+        }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ ok: true, file: `shots/${name}` }));
       } catch (err) {
