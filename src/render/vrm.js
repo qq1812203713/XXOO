@@ -394,6 +394,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const BACK = new V(0, 0, -1);
   const DOWN = new V(0, -1, 0);
 
+  const lastDiag = {};
   let dt = 0; // 当前帧时长，writeLocal 的平滑用
   function poseFromRig(brain, face, frameDt) {
     dt = frameDt;
@@ -409,6 +410,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     wq.clear();
     aq.clear();
     lastTarget.clear();
+
+    // 诊断：把“该动多少”和“实际写进去多少”都记下来
+    lastDiag.poseSize = p.size ?? Object.keys(p).length;
+    lastDiag.armA = j('arm_L_upper')?.a;
 
     // —— 躯干：绕世界 Z 轴侧倾，逐段累积 ——
     const pelvis = j('pelvis');
@@ -632,6 +637,25 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       }
       faceProbe = `手动 ${deg}°`;
       return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
+    },
+    // 把内部状态摊开：骨骼有没有真的被写进去
+    debugState() {
+      const q = (n) => {
+        const b = node(n);
+        if (!b) return null;
+        return {
+          local: b.quaternion.toArray().map((v) => +v.toFixed(3)),
+          auto: vrm.humanoid.autoUpdateHumanBones,
+        };
+      };
+      return {
+        springOn,
+        poseSize: lastDiag.poseSize,
+        armA: lastDiag.armA === undefined ? null : +lastDiag.armA.toFixed(3),
+        rightUpperArm: q('rightUpperArm'),
+        spine: q('spine'),
+        restDirArm: rest.rightUpperArm?.dir ? rest.rightUpperArm.dir.toArray().map((v) => +v.toFixed(3)) : null,
+      };
     },
     get springOn() {
       return springOn;

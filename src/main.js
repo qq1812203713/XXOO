@@ -179,6 +179,13 @@ async function bootBody() {
         girl3dCanvas?.classList.add('on');
         markAwake('3D 身体（VRM）');
         setTimeout(startSnapshots, 900);
+        setTimeout(() => {
+          try {
+            reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+          } catch (err) {
+            reportToServer(`state failed: ${err}`, 'state');
+          }
+        }, 2500);
         log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
         return;
       }
