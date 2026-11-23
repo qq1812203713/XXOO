@@ -15,7 +15,7 @@ import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
 import { hasWebGL } from './render/gl.js';
 import { createAnimeBody } from './render/live2d.js';
-import { create3DBody } from './render/vrm.js';
+import { create3DBody, MODELS, MODEL_ORDER } from './render/vrm.js';
 
 // 把浏览器里的错误回传到服务器日志：我看日志就等于看控制台
 let reported = 0;
@@ -165,6 +165,27 @@ function markAwake(label) {
 
 let last3DFail = '';
 
+// ————— 换建模 —————
+// 都是 VRM 标准骨架，动作/手指/表情那一整套直接通用，换的只是“皮”。
+const MODEL_KEY = 'xxoo.model';
+function currentModelKey() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const f = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
+    const asked = q.get('model') || f.get('model');
+    if (asked && MODELS[asked]) {
+      globalThis.localStorage?.setItem(MODEL_KEY, asked);
+      return asked;
+    }
+    const saved = globalThis.localStorage?.getItem(MODEL_KEY);
+    if (saved && MODELS[saved]) return saved;
+  } catch {
+    /* 隐私模式 */
+  }
+  return 'alicia';
+}
+const modelKey = currentModelKey();
+
 function showBodyHint() {
   const el = document.getElementById('bodyhint');
   if (!el) return;
@@ -184,7 +205,7 @@ async function tryBoot3D() {
   try {
     const body = await create3DBody({
       canvas: girl3dCanvas,
-      modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
+      modelUrl: MODELS[modelKey].url,
       onStatus: (msg) => {
         const el = document.getElementById('ver');
         if (el) el.dataset.status = msg;
@@ -204,6 +225,22 @@ async function tryBoot3D() {
       document.getElementById('faceview')?.classList.toggle('on', !!on);
       hudNote(on ? '推近 · 看她的脸' : '退回全身');
     });
+    const modelBtn = document.getElementById('model');
+    if (modelBtn) {
+      modelBtn.textContent = MODELS[modelKey]?.cn || '建模';
+      modelBtn.title = `${MODELS[modelKey]?.cn || ''} · ${MODELS[modelKey]?.note || ''} —— 点一下换下一具`;
+      modelBtn.addEventListener('click', () => {
+        const i = MODEL_ORDER.indexOf(modelKey);
+        const next = MODEL_ORDER[(i + 1) % MODEL_ORDER.length];
+        try {
+          globalThis.localStorage?.setItem(MODEL_KEY, next);
+        } catch {
+          /* ignore */
+        }
+        hudNote(`换身体 · ${MODELS[next]?.cn || next}（重新加载中）`);
+        setTimeout(() => location.reload(), 420);
+      });
+    }
     document.getElementById('flip')?.addEventListener('click', () => {
       const deg = body3d?.turnBody?.(180);
       hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
@@ -219,14 +256,18 @@ async function tryBoot3D() {
       const act = f.get('act');
       if (act) {
         body3d.play(act);
-        setInterval(() => body3d?.play(act), 4200); // 自检：一直重播，方便我抓帧
+        const at = f.get('at');
+        if (at != null) body3d.freezeAt(act, parseFloat(at) || 0); // 自检：钉在某一帧
+        else setInterval(() => body3d?.play(act), 4200); // 自检：一直重播，方便我抓帧
       }
       const mood = f.get('mood');
       if (mood) body3d.setMoodOverride(mood);
-      if (f.get('face') === '1') {
-        body3d.setFaceView(true);
-        document.getElementById('faceview')?.classList.add('on');
-        setInterval(() => body3d?.setFaceView(true), 5000); // 自检：钉住看脸模式
+      const faceFlag = f.get('face');
+      if (faceFlag === '1' || faceFlag === '0') {
+        const want = faceFlag === '1';
+        body3d.setFaceView(want);
+        document.getElementById('faceview')?.classList.toggle('on', want);
+        setInterval(() => body3d?.setFaceView(want), 4000); // 自检：钉住看脸/全身
       }
     } catch {
       /* ignore */

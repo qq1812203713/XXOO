@@ -88,6 +88,15 @@ const EXPRESSIONS = {
 };
 
 // 我们一定会去写这些骨骼。测试拿它跟 .vrm 里的 humanoid 列表逐条核对。
+// 可以换的「建模」。都是 VRM 标准骨架，所以同一套动作、同一套 30 根手指全部通用。
+// 想加新的：把 .vrm 丢进 vendor/model/ 下，在这里加一行就行。
+export const MODELS = {
+  alicia: { url: './vendor/model/alicia/AliciaSolid.vrm', cn: '爱丽丝', note: 'VRoid 官方 · 白裙金发' },
+  sampleA: { url: './vendor/model/sampleA/AvatarSample_A.vrm', cn: '小明', note: 'VRoid 官方样张 A · 制服' },
+  seed: { url: './vendor/model/seed/Seed-san.vrm', cn: '见子', note: 'VRM 官方样张 · 短发' },
+};
+export const MODEL_ORDER = ['alicia', 'sampleA', 'seed'];
+
 export const REQUIRED_BONES = (() => {
   const out = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftEye', 'rightEye'];
   for (const s of ['left', 'right']) {
@@ -478,6 +487,20 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const visH = height * 1.16;
     const dist = visH / (2 * Math.tan(camera.fov / 2 / DEG));
     camera.position.set(0, height * 0.57, FRONT * dist);
+    // 自检用：?view=side / ?view=back 转到侧面看轮廓（判断弯腰、迈步对不对，正面会透视压缩看不出真形）
+    let sideView = 0;
+    try {
+      const q = new URLSearchParams(
+        [globalThis.location?.search?.replace(/^\?/, '') || '', globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'),
+      );
+      const v = q.get('view');
+      if (v === 'side') sideView = Math.PI / 2;
+      else if (v === 'back') sideView = Math.PI;
+      else if (v) sideView = (parseFloat(v) * Math.PI) / 180 || 0;
+    } catch {
+      /* ignore */
+    }
+    if (sideView) camera.position.applyAxisAngle(new V(0, 1, 0), sideView);
     camera.lookAt(0, height * 0.52, 0);
     camHome.pos.copy(camera.position);
     camHome.tgt.set(0, height * 0.52, 0);
@@ -921,25 +944,64 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
   }
 
-  function bakeClip(name, keys) {
-    const snaps = keys.map((k) => ({ t: k.t, snap: bakePose(k.fn) }));
+  // 关键帧只有 4~5 个，直接丢给 mixer 就是「一条直线冲过去」—— 关节看起来像机器人。
+  // 这里按 30 fps 重新采样，并且给每一段加 smoothstep 缓动（起手慢、中间快、收手慢），
+  // 动作才是连贯的、有重量的，也永远不会「抽搐」。
+  const smoothEase = (u) => u * u * (3 - 2 * u);
+  function bakeClip(name, keys, opt = {}) {
+    const fps = opt.fps || 30;
+    const ease = opt.ease || smoothEase;
+    const hipsNode = node('hips');
+    const snaps = keys.map((k) => ({
+      t: k.t,
+      snap: bakePose(k.fn),
+      // 胯的平移也要烘进去（弯腰时屁股往后坐、蹲下时往下沉）
+      hips: hipsNode ? hipsNode.position.clone() : new V(),
+    }));
     const bones = new Set();
     for (const s0 of snaps) for (const b of s0.snap.keys()) bones.add(b);
+    const end = Math.max(0.01, keys[keys.length - 1].t);
+    const n = Math.max(2, Math.round(end * fps));
+    const times = [];
+    for (let i = 0; i <= n; i++) times.push(+((end * i) / n).toFixed(4));
     const tracks = [];
+    const tmpQ = new Q();
     for (const bone of bones) {
-      const n = node(bone);
-      if (!n) continue;
-      n.name = BONE_NAME(bone);
-      const times = [];
+      const nn = node(bone);
+      if (!nn) continue;
+      nn.name = BONE_NAME(bone);
       const values = [];
-      for (const s0 of snaps) {
-        times.push(s0.t);
-        const q = s0.snap.get(bone) || new Q(); // 该帧没写 = 静止
-        values.push(q.x, q.y, q.z, q.w);
+      for (const tt of times) {
+        let i = 0;
+        while (i < snaps.length - 2 && tt > snaps[i + 1].t) i++;
+        const a = snaps[i];
+        const b = snaps[i + 1] || snaps[i];
+        const span = Math.max(1e-6, b.t - a.t);
+        const u = clamp((tt - a.t) / span, 0, 1);
+        const qa = a.snap.get(bone) || new Q();
+        const qb = b.snap.get(bone) || new Q();
+        tmpQ.copy(qa).slerp(qb, ease(u));
+        values.push(tmpQ.x, tmpQ.y, tmpQ.z, tmpQ.w);
       }
-      tracks.push(new THREE.QuaternionKeyframeTrack(`${n.name}.quaternion`, times, values));
+      tracks.push(new THREE.QuaternionKeyframeTrack(`${nn.name}.quaternion`, times, values));
     }
-    return new THREE.AnimationClip(name, keys[keys.length - 1].t, tracks);
+    // 胯的位移轨道（骨骼的旋转走四元数，位移单独一条）
+    if (hipsNode) {
+      const vals = [];
+      const pa = new V();
+      for (const tt of times) {
+        let i = 0;
+        while (i < snaps.length - 2 && tt > snaps[i + 1].t) i++;
+        const a = snaps[i];
+        const b = snaps[i + 1] || snaps[i];
+        const span = Math.max(1e-6, b.t - a.t);
+        const u = clamp((tt - a.t) / span, 0, 1);
+        pa.copy(a.hips).lerp(b.hips, ease(u));
+        vals.push(pa.x, pa.y, pa.z);
+      }
+      tracks.push(new THREE.VectorKeyframeTrack(`${BONE_NAME('hips')}.position`, times, vals));
+    }
+    return new THREE.AnimationClip(name, end, tracks);
   }
 
   // ————————————————— 腿：两段 IK（髋 → 膝 → 踝） —————————————————
@@ -962,12 +1024,26 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       footDir: rest[`${s}Foot`].dir.clone(),
     };
   }
+  // 胯可以平移（弯腰时屁股往后坐）：记住原始位置，好还原
+  const HIPS_REST = (() => {
+    const h = node('hips');
+    return h ? h.position.clone() : new V();
+  })();
+  // 把胯挪到 (0, -drop, +back)，返回位移量给腿部 IK 用
+  const hipOffset = new V();
+  function shiftHips(back = 0, drop = 0) {
+    hipOffset.set(0, -drop, back);
+    const h = node('hips');
+    if (h) h.position.copy(HIPS_REST).add(hipOffset);
+    return hipOffset;
+  }
 
   // 髋在 hip、踝想去 ankle，求膝的位置（膝盖朝前弯）
-  function solveLeg(s, ankleTarget, sink = 0) {
+  function solveLeg(s, ankleTarget, sink = 0, off = null) {
     const L = LEG[s];
     if (!L) return;
-    const hip = L.hip.clone().addScaledVector(Y_AXIS, -sink);
+    // 胯一旦平移，髋关节也跟着走 —— IK 必须从新的髋点解，否则脚会飘
+    const hip = L.hip.clone().addScaledVector(Y_AXIS, -sink).add(off ? off : new V());
     const toA = ankleTarget.clone().sub(hip);
     const maxd = (L.L1 + L.L2) * 0.995;
     let d = toA.length();
@@ -1063,34 +1139,74 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     poseFingers(bs, curl);
   }
 
-  // 一具“站着”的身体：所有轨道都以它为底，差别只在参数
+  // ————————————————— 方向约定 —————————————————
+  // 解剖学上「往前倾、低头」是正数；但 three 里绕 +X 转是把 +Y 推向 +Z，
+  // 而她的正面是 -Z —— 所以世界 pitch 必须取负。
+  // 上一版弯腰往后折，就是因为这里少了这个负号。
+  const FWD = (rad) => -rad;
+
+  // 一具「站着」的身体：所有轨道都以它为底，差别只在参数
   function basePose(cfg = {}) {
     const {
       breath = 0,
-      sway = 0,
+      sway = 0, // 左右重心（+1 = 压到她自己的左边）
+      hipYaw = 0, // 胯的朝向
+      torsoYaw = 0, // 上身相对胯再扭一点（转身/回头的跟随）
       headYaw = 0,
-      headPitch = 0,
+      headPitch = 0, // + = 低头
       headRoll = 0,
+      bend = 0, // 0..1：弯腰。髋-腰-胸-上胸分摊，不是只折腰
+      hipBack = 0, // 米：屁股往后坐（弯腰的髋铰链）
+      hipDrop = 0, // 米：胯往下沉（膝就自然弯了）
+      kneeSoft = 0, // 0..1：膝盖吃一点力（落地、负重）
       armL = null,
       armR = null,
       swing = 0,
       elbow = 0.16,
       hand = 0.08,
       curl = 0.14,
-      bend = 0, // 弯腰：整条脊柱往前折，不是只低头
     } = cfg;
 
-    turn('hips', { x: bend * 0.1, y: sway * 0.05, z: sway * 0.022 });
-    turn('spine', { x: breath * 0.012 + bend * 0.36, y: sway * 0.03, z: 0 });
-    turn('chest', { x: breath * 0.03 + bend * 0.26, y: headYaw * 0.2, z: sway * 0.012 });
-    turn('upperChest', { x: breath * 0.02 + bend * 0.16, y: headYaw * 0.16, z: 0 });
-    turn('neck', { x: headPitch * 0.3, y: headYaw * 0.3, z: headRoll * 0.3 });
-    turn('head', { x: headPitch * 0.6, y: headYaw * 0.62, z: headRoll * 0.6 });
+    // 弯腰的正确分法（参考髋铰链 / 关节活动度）：
+    // 胯先折一点 → 腰椎、胸椎、上胸按 0.30/0.26/0.18 分摊 → 颈椎最后补 0.10，
+    // 全程背是平的，脑袋跟着脊柱走，不是单独低头。
+    const b = clamp(bend, 0, 1.15);
+    turn('hips', {
+      x: FWD(b * 0.1) + breath * 0.004 + kneeSoft * 0.03,
+      y: hipYaw * 0.45 + sway * 0.05,
+      z: sway * 0.022 + kneeSoft * 0.01,
+    });
+    turn('spine', {
+      x: FWD(b * 0.3) + breath * 0.012,
+      y: hipYaw * 0.25 + torsoYaw * 0.3 + sway * 0.03,
+      z: sway * 0.012,
+    });
+    turn('chest', {
+      x: FWD(b * 0.26) + breath * 0.03,
+      y: hipYaw * 0.15 + torsoYaw * 0.35 + headYaw * 0.18,
+      z: sway * 0.01,
+    });
+    turn('upperChest', {
+      x: FWD(b * 0.18) + breath * 0.02,
+      y: torsoYaw * 0.2 + headYaw * 0.14,
+      z: 0,
+    });
+    turn('neck', {
+      x: FWD(b * 0.1) + FWD(headPitch * 0.3),
+      y: headYaw * 0.3 - hipYaw * 0.15,
+      z: headRoll * 0.3,
+    });
+    turn('head', {
+      x: FWD(b * 0.06) + FWD(headPitch * 0.6),
+      y: headYaw * 0.62 - hipYaw * 0.1 + torsoYaw * 0.1,
+      z: headRoll * 0.6,
+    });
 
-    // 站姿：双脚就在原地（腿也要解一次 IK，膝盖才不是锁死的）
+    // 站姿：脚钉在原地，胯一沉一坐，腿的 IK 就自动弯膝 —— 这才是「髋铰链」
+    const off = shiftHips(hipBack + kneeSoft * 0.01, hipDrop + kneeSoft * 0.008);
     for (const s of ['left', 'right']) {
       if (!LEG[s]) continue;
-      solveLeg(s, LEG[s].ankle.clone(), 0.006);
+      solveLeg(s, LEG[s].ankle.clone(), 0.004, off);
       aim(`${s}Foot`, LEG[s].footDir.clone());
     }
 
@@ -1101,13 +1217,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const NEUTRAL = () => basePose({});
 
   function walkPose(p) {
+    shiftHips(0, 0); // 走路时胯回正（否则上一段动作的位移会残留）
     const s2 = Math.sin(2 * Math.PI * p);
-    turn('hips', { x: 0.03, y: -s2 * 0.06, z: s2 * 0.035 });
-    turn('spine', { x: 0.02, y: s2 * 0.04, z: -s2 * 0.015 });
-    turn('chest', { x: 0.02, y: s2 * 0.05 });
+    // 走路是往前走的：躯干往前 3° 左右，头保持水平（眼睛看前面）
+    turn('hips', { x: FWD(0.03), y: -s2 * 0.06, z: s2 * 0.035 });
+    turn('spine', { x: FWD(0.02), y: s2 * 0.04, z: -s2 * 0.015 });
+    turn('chest', { x: FWD(0.02), y: s2 * 0.05 });
     turn('upperChest', { x: 0, y: s2 * 0.03 });
-    turn('neck', { x: -0.05 });
-    turn('head', { x: -0.03, y: -s2 * 0.05 });
+    turn('neck', { x: FWD(-0.02) });
+    turn('head', { x: FWD(-0.04), y: -s2 * 0.05 });
     gaitLeg('left', p % 1);
     gaitLeg('right', (p + 0.5) % 1);
     // 手臂与同侧的腿反向摆
@@ -1116,24 +1234,59 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     poseArm('left', swingDir('left'), 0.3, 0.12, 0.25);
   }
 
-  // 原地转身：重心移到一只脚上，另一只脚抬起来换个方向
+  // 原地转身 —— 按真实的重心转移拆成四段（参考 Animation Mentor 的 turnaround 分解）：
+  //   0.00–0.18  预判：头先转过去，上身跟一点点，脚还没动
+  //   0.18–0.58  主力：胯跟着转，外侧脚抬起、走一条小弧线
+  //   0.58–0.84  落地：脚掌先着地、膝盖吃一下力，上身轻微过冲
+  //   0.84–1.00  收尾：头最后回正，手臂的跟随甩尾
   function turnPose(dir, k) {
-    const yaw = dir * 0.6 * k;
-    turn('hips', { x: 0.02, y: yaw * 0.6 });
-    turn('spine', { x: 0.03, y: yaw * 0.2 });
-    turn('chest', { x: 0.03, y: yaw * 0.15 });
-    turn('neck', { y: yaw * 0.1 });
-    turn('head', { y: yaw * 0.25 });
-    const swingSide = dir > 0 ? 'right' : 'left';
+    shiftHips(0, 0);
+    const seg = (a, b) => clamp((k - a) / (b - a), 0, 1);
+    const sm = (u) => u * u * (3 - 2 * u);
+    const headLead = sm(seg(0, 0.22)) - sm(seg(0.72, 1)) * 0.7; // 头先走、最后收
+    const chestF = sm(seg(0.06, 0.5));
+    const hipF = sm(seg(0.16, 0.7));
+    const settle = sm(seg(0.62, 1));
+    const over = Math.sin(Math.PI * seg(0.5, 0.92)) * 0.14; // 过冲再回来
+    const step = Math.sin(Math.PI * seg(0.2, 0.8)); // 脚抬起-落下的弧
+
+    const hipYaw = dir * (0.62 * hipF + over * 0.4 - 0.04 * (1 - sm(seg(0, 0.3))));
+    const torsoYaw = dir * (0.26 * chestF + 0.1 * headLead - over * 0.5);
+    const hYaw = dir * (0.5 * headLead + over * 0.5);
+
+    turn('hips', { x: FWD(0.02) - step * 0.02, y: hipYaw, z: dir * -0.05 * step });
+    turn('spine', { x: FWD(0.03), y: torsoYaw * 0.5, z: dir * 0.02 * step });
+    turn('chest', { x: FWD(0.02), y: torsoYaw * 0.7 + hipYaw * 0.15, z: 0 });
+    turn('upperChest', { x: 0, y: torsoYaw * 0.3, z: 0 });
+    turn('neck', { x: FWD(0.02), y: hYaw * 0.28, z: 0 });
+    turn('head', { x: FWD(0.02), y: hYaw * 0.6, z: dir * -0.04 * step });
+
+    // 支撑腿：重心压上去，膝盖吃一点力
+    const plantSide = dir > 0 ? 'left' : 'right';
+    const freeSide = dir > 0 ? 'right' : 'left';
     for (const s of ['left', 'right']) {
       if (!LEG[s]) continue;
       const base = LEG[s].ankle;
-      const lift = s === swingSide ? Math.sin(Math.PI * k) * 0.07 : 0;
-      solveLeg(s, new V(base.x, base.y + lift, base.z + (s === swingSide ? -0.02 : 0)), 0.012 + lift * 0.4);
-      aim(`${s}Foot`, rotateAround(LEG[s].footDir, X_AXIS, lift > 0 ? 0.24 : 0));
+      if (s === freeSide) {
+        // 抬起来的那只脚：弧线往前上方摆，落地时已经换了个朝向
+        const t = base.clone();
+        t.y += step * 0.075;
+        t.x += dir * step * 0.035;
+        t.z += step * 0.03;
+        solveLeg(s, t, 0.014 + step * 0.03);
+        aim(`${s}Foot`, rotateAround(LEG[s].footDir, X_AXIS, step * 0.3));
+      } else {
+        solveLeg(s, base, 0.006 + settle * 0.014);
+        aim(`${s}Foot`, LEG[s].footDir.clone());
+      }
     }
-    poseArm('right', null, 0.22, 0.1, 0.16);
-    poseArm('left', null, 0.22, 0.1, 0.16);
+    void plantSide;
+    // 手臂：甩尾 —— 起步慢半拍，停下还在动
+    const lag = Math.sin(Math.PI * seg(0.1, 0.95)) * 0.16;
+    const armSwing = (side) =>
+      rotateAround(ARM_HANG[side], X_AXIS, dir * lag * (side === 'L' ? 1.0 : -0.8));
+    poseArm('right', armSwing('L'), 0.24 + step * 0.06, 0.1, 0.16);
+    poseArm('left', armSwing('R'), 0.24 + step * 0.06, 0.1, 0.16);
   }
 
   const CLIPS = {
@@ -1149,8 +1302,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const p = i / 24;
       return { t: p * WALK.T, fn: () => walkPose(p) };
     })),
-    turnL: safeClip('turnL', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(1, k) }))),
-    turnR: safeClip('turnR', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(-1, k) }))),
+    // 转身 1.5 秒：预判 0.25s + 转体 0.7s + 落地收尾 0.55s。快过这个数就一定像瞬移。
+    turnL: safeClip('turnL', Array.from({ length: 13 }, (_, i) => ({ t: (i / 12) * 1.5, fn: () => turnPose(1, i / 12) }))),
+    turnR: safeClip('turnR', Array.from({ length: 13 }, (_, i) => ({ t: (i / 12) * 1.5, fn: () => turnPose(-1, i / 12) }))),
     // 手指：握一下再张开（30 根一起，是“她真的在用手”的证据）
     grip: safeClip('grip', [
       { t: 0, fn: () => basePose({ curl: 0.15 }) },
@@ -1183,18 +1337,24 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       { t: 2.3, fn: NEUTRAL },
     ]),
     // 这几个是「听得懂人话」的那部分：你让她弯腰、点头、摇头、挥手，她真的会做
+    // 鞠躬（お辞儀）的真实节奏：先轻轻拔一下背 → 45° 慢慢下去 → 停 0.5 秒 → 起得比下得慢
+    // 手臂是垂下去的（世界空间里朝地面），所以躯干折下去时手会自然吊在身体前面，不会张着。
     bow: safeClip('bow', [
       { t: 0, fn: NEUTRAL },
-      { t: 0.55, fn: () => basePose({ bend: 0.9, headPitch: 0.3, elbow: 0.2, curl: 0.18, breath: -0.2 }) },
-      { t: 1.3, fn: () => basePose({ bend: 1.0, headPitch: 0.34, elbow: 0.2, curl: 0.18, breath: -0.2 }) },
-      { t: 2.1, fn: NEUTRAL },
+      { t: 0.3, fn: () => basePose({ bend: -0.08, breath: 0.4, elbow: 0.18, curl: 0.16 }) },
+      { t: 1.0, fn: () => basePose({ bend: 0.72, hipBack: 0.045, hipDrop: 0.012, breath: -0.3, elbow: 0.2, curl: 0.2, armL: new V(0.1, -0.99, -0.04), armR: new V(-0.1, -0.99, -0.04) }) },
+      { t: 1.35, fn: () => basePose({ bend: 0.82, hipBack: 0.06, hipDrop: 0.02, breath: -0.4, elbow: 0.22, curl: 0.22, armL: new V(0.1, -0.99, -0.02), armR: new V(-0.1, -0.99, -0.02) }) },
+      { t: 2.0, fn: () => basePose({ bend: 0.8, hipBack: 0.058, hipDrop: 0.019, breath: -0.35, elbow: 0.22, curl: 0.22, armL: new V(0.1, -0.99, -0.02), armR: new V(-0.1, -0.99, -0.02) }) },
+      { t: 2.9, fn: () => basePose({ bend: 0.16, hipBack: 0.012, hipDrop: 0.004, breath: 0.2, elbow: 0.2, curl: 0.16 }) },
+      { t: 3.4, fn: NEUTRAL },
     ]),
+    // 点头：头带着一点点胸口，两次，第二次小一点 —— 人不会只点一下还点得一样大
     nod: safeClip('nod', [
       { t: 0, fn: NEUTRAL },
-      { t: 0.2, fn: () => basePose({ headPitch: 0.34 }) },
-      { t: 0.42, fn: () => basePose({ headPitch: -0.04 }) },
-      { t: 0.64, fn: () => basePose({ headPitch: 0.3 }) },
-      { t: 0.9, fn: NEUTRAL },
+      { t: 0.26, fn: () => basePose({ headPitch: 0.3, bend: 0.05, breath: 0.2 }) },
+      { t: 0.52, fn: () => basePose({ headPitch: -0.03 }) },
+      { t: 0.78, fn: () => basePose({ headPitch: 0.2, bend: 0.03 }) },
+      { t: 1.1, fn: NEUTRAL },
     ]),
     shake: safeClip('shake', [
       { t: 0, fn: NEUTRAL },
@@ -1294,8 +1454,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     nav.dir = dir;
     nav.t0 = t;
     nav.yawFrom = nav.yaw;
-    nav.yawTo = nav.yaw + dir * (0.55 + Math.random() * 0.5);
-    playAction(dir > 0 ? 'turnL' : 'turnR', 0.3);
+    nav.yawTo = nav.yaw + dir * (0.6 + Math.random() * 0.45);
+    playAction(dir > 0 ? 'turnL' : 'turnR', 0.22);
   }
 
   function startWalk(sec) {
@@ -1392,8 +1552,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       return;
     }
     if (nav.mode === 'turn') {
-      const k = clamp((t - nav.t0) / 0.75, 0, 1);
-      const e = k * k * (3 - 2 * k);
+      // 1.5 秒，而且开头先反向「预备」一下 —— 这是真人转身的做法，不是瞬间掉头
+      const k = clamp((t - nav.t0) / 1.5, 0, 1);
+      const pre = k < 0.16 ? -0.06 * Math.sin((k / 0.16) * Math.PI * 0.5) : 0;
+      const e = Math.max(0, k * k * (3 - 2 * k) + pre);
       nav.yaw = nav.yawFrom + (nav.yawTo - nav.yawFrom) * e;
       if (k >= 1) {
         nav.mode = 'idle';
@@ -1556,6 +1718,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       nav.until = t + 3;
       return true;
     },
+    // 自检：把某段动作钉在某一秒，方便我抓帧核对姿势
+    freezeAt(name, sec) {
+      const a = actions[name];
+      if (!a) return false;
+      playAction(name, 0.01);
+      a.paused = true;
+      a.time = clamp(sec, 0, a.getClip().duration - 0.001);
+      return a.time;
+    },
     setMoodOverride(m) {
       moodOverride = m || null;
       return moodOverride;
@@ -1597,6 +1768,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       };
       return {
         springOn,
+        hipPos: node('hips') ? node('hips').position.toArray().map((v) => +v.toFixed(3)) : null,
+        hipRest: HIPS_REST.toArray().map((v) => +v.toFixed(3)),
+        clipT: +(actions[current]?.time || 0).toFixed(2),
+        clipLen: +(actions[current]?.getClip()?.duration || 0).toFixed(2),
         mode: LEGACY ? 'legacy' : 'mixer',
         clip: lastDiag.clip,
         played: actsPlayed,
