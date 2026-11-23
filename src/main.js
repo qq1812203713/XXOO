@@ -261,22 +261,28 @@ let frameN = 0;
 let last = performance.now();
 let lastSave = performance.now();
 
+// 一帧的全部工作。抽出来是为了给“看门狗”复用。
+let lastFrameAt = performance.now();
+function step(dt) {
+  brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
+  if (body3d) body3d.sync(brain, motors.parts.face, dt);
+  else if (anime) anime.sync(brain, motors.parts.face, dt);
+  renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
+  ui.frame(dt, Date.now());
+  lastFrameAt = performance.now();
+}
+
 function loop(now) {
   const raw = (now - last) / 1000;
   last = now;
   const dt = clamp(raw, 0, 0.06) * ui.speed;
 
   try {
-    brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
-    if (body3d) body3d.sync(brain, motors.parts.face, dt);
-    else if (anime) anime.sync(brain, motors.parts.face, dt);
-
+    step(dt);
     if (debugEl && body3d && (frameN++ % 20 === 0)) {
       const lines = body3d.debugLines ? body3d.debugLines() : [];
       debugEl.textContent = [`build v${BUILD.slice(-4)}`, ...lines].join('\n');
     }
-    renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
-    ui.frame(dt, Date.now());
   } catch (err) {
     console.error(err);
     reportToServer(`loop: ${err && err.stack ? err.stack : err}`, 'loop');
@@ -290,24 +296,18 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-// —— 自动留档：她加载完成后，隔几秒抓几帧传到服务器 ——
-// 这样“她到底长什么样、有没有在抽搐”能被我直接看到，而不是靠人描述。
-function startSnapshots() {
-  if (new URLSearchParams(location.search).get('shot') === '0') return;
-  let n = 0;
-  const timer = setInterval(() => {
-    n += 1;
-    const data = body3d?.snapshot?.();
-    if (data) {
-      fetch('./shot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tag: `t${n}-${body3d?.springOn ? 'spring' : 'rigid'}`, data }),
-      }).catch(() => {});
-    }
-    if (n >= 6) clearInterval(timer);
-  }, 1400);
-}
+// —— 看门狗 ——
+// 后台标签页 / 被隐藏的 iframe 里 requestAnimationFrame 会彻底停掉，
+// 页面就永远停在“加载时那一帧静止的 T-pose”。这就是我截图看不出毛病的原因。
+// 只要 500ms 没推进过，就用定时器以 10fps 顶上。
+setInterval(() => {
+  if (performance.now() - lastFrameAt < 500) return;
+  try {
+    step(0.1);
+  } catch (err) {
+    reportToServer(`watchdog: ${err && err.stack ? err.stack : err}`, 'watchdog');
+  }
+}, 100);
 
 // 开场前先把身体摆好，避免第一帧从“零姿势”弹出来
 brain.tick(1 / 60, { pointer: null, petting: false });
