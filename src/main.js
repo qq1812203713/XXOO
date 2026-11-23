@@ -190,7 +190,9 @@ async function bootBody() {
         return;
       }
     } catch (err) {
-      bodyErrors.push(`3D：${err && err.message ? err.message : err}`);
+      const msg = `3D：${err && err.stack ? err.stack : err}`;
+      bodyErrors.push(msg);
+      reportToServer(msg, 'boot3d');
     }
   }
 
@@ -208,7 +210,9 @@ async function bootBody() {
         return;
       }
     } catch (err) {
-      bodyErrors.push(`Live2D：${err && err.message ? err.message : err}`);
+      const msg = `Live2D：${err && err.stack ? err.stack : err}`;
+      bodyErrors.push(msg);
+      reportToServer(msg, 'bootlive2d');
     }
   }
 
