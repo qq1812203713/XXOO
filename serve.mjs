@@ -15,6 +15,17 @@ const PORT = Number(process.env.PORT || 8000);
 // 改写成 `./x.js?b=<构建号>`，这样浏览器/代理手里的旧模块副本永远不会被复用。
 // 之前「改了代码但你看到的还是旧页面」就是死在这里。
 const BUILD = Date.now().toString(36);
+// 改了 .flags 就当成新版本：页面会自动刷新，自检时切换视角/模型不用手动刷
+function flagsStamp() {
+  try {
+    const t = fs.readFileSync(path.join(ROOT, '.flags'), 'utf8').trim();
+    let h = 0;
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    return BUILD + '.' + Math.abs(h).toString(36);
+  } catch {
+    return BUILD;
+  }
+}
 const IMPORT_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])(\.{1,2}\/[^'"]+?\.m?js)\2/g;
 
 function bustImports(src) {
@@ -179,7 +190,7 @@ const server = http.createServer((req, res) => {
 
   // 当前构建号：页面拿它比较自己是不是旧版
   if (rel === '/version') {
-    const out = JSON.stringify({ build: BUILD });
+    const out = JSON.stringify({ build: flagsStamp() });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(out), 'Cache-Control': 'no-store' });
     res.end(out);
     return done(200);
@@ -195,7 +206,7 @@ const server = http.createServer((req, res) => {
     let body = buf;
     if (type.startsWith('text/html')) {
       // 把构建号写进 HTML，页面上就能显示“我是哪一版”——排查缓存问题全靠它
-      let html = buf.toString('utf8').replaceAll('__BUILD__', BUILD);
+      let html = buf.toString('utf8').replaceAll('__BUILD__', flagsStamp());
       // 自检开关：仓库里放一个 .flags 文件（如 freeze=0.25&every=0.4），
       // 注入到页面里 —— 我不需要用户帮我改地址栏，也不用重定向。
       let flags = '';

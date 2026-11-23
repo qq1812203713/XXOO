@@ -15,7 +15,7 @@ import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
 import { hasWebGL } from './render/gl.js';
 import { createAnimeBody } from './render/live2d.js';
-import { create3DBody, MODELS, MODEL_ORDER } from './render/vrm.js';
+import { create3DBody, MODELS, MODEL_ORDER, OUTFITS } from './render/vrm.js';
 
 // 把浏览器里的错误回传到服务器日志：我看日志就等于看控制台
 let reported = 0;
@@ -247,20 +247,35 @@ async function tryBoot3D() {
     // 换身体：下拉选择，选中就换
     const modelSel = document.getElementById('model');
     if (modelSel) {
-      modelSel.innerHTML = MODEL_ORDER.map(
-        (k) => `<option value="${k}">${MODELS[k]?.cn || k}</option>`,
-      ).join('');
-      modelSel.value = modelKey;
+      // 选项 = 每具建模 × 它的可选穿搭（只有能分层脱的才多一项）
+      const opts = [];
+      for (const k of MODEL_ORDER) {
+        opts.push(`<option value="${k}">${MODELS[k]?.cn || k}</option>`);
+        for (const o of OUTFITS[k] || []) {
+          opts.push(`<option value="${k}|${o.id}">${MODELS[k]?.cn || k} · ${o.cn}</option>`);
+        }
+      }
+      modelSel.innerHTML = opts.join('');
+      let hideNow = '';
+      try {
+        hideNow = globalThis.localStorage?.getItem('xxoo.hide') || '';
+      } catch {
+        /* ignore */
+      }
+      const light = (OUTFITS[modelKey] || []).find((o) => o.hide === hideNow);
+      modelSel.value = light ? `${modelKey}|${light.id}` : modelKey;
       const opt = modelSel.querySelector(`option[value="${modelKey}"]`);
       modelSel.title = opt ? MODEL_SELECT_TITLE(modelKey) : '换一具身体';
       modelSel.addEventListener('change', () => {
-        const next = modelSel.value;
+        const [next, outfitId] = String(modelSel.value).split('|');
+        const outfit = (OUTFITS[next] || []).find((o) => o.id === outfitId);
         try {
           globalThis.localStorage?.setItem(MODEL_KEY, next);
+          globalThis.localStorage?.setItem('xxoo.hide', outfit?.hide || '');
         } catch {
           /* ignore */
         }
-        hudNote(`换身体 · ${MODELS[next]?.cn || next}（重新加载中）`);
+        hudNote(`换身体 · ${MODELS[next]?.cn || next}${outfit ? ' · ' + outfit.cn : ''}（重新加载中）`);
         setTimeout(() => location.reload(), 360);
       });
     }
