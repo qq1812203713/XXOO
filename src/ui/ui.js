@@ -615,15 +615,15 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
       }
       return;
     }
-    // 没有 3D 身体（Live2D / 2D）时退回骨骼示意图
-    renderer.drawInspector(g2, {
-      rig,
-      pose: brain.state.pose,
-      side: nerveTab.side,
-      part: nerveTab.part,
-      width: rect.width,
-      height: rect.height,
-    });
+    // 没有 3D 身体（Live2D / 2D）时不要画那团抽象的骨架 —— 它看着像坏了
+    g2.clearRect(0, 0, rect.width, rect.height);
+    g2.font = '11px ui-sans-serif, system-ui, sans-serif';
+    g2.fillStyle = 'rgba(255,214,232,0.55)';
+    g2.textAlign = 'center';
+    g2.fillText('这具身体还是 2D 的', rect.width / 2, rect.height / 2 - 6);
+    g2.fillStyle = 'rgba(255,214,232,0.35)';
+    g2.fillText('3D 骨骼一上来，这里会显示她的真实骨头', rect.width / 2, rect.height / 2 + 12);
+    g2.textAlign = 'left';
   }
 
   function updateLog() {

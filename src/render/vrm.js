@@ -779,6 +779,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return snap;
   }
 
+  const clipErrors = [];
+  function safeClip(name, keys) {
+    try {
+      return bakeClip(name, keys);
+    } catch (err) {
+      clipErrors.push(`${name}: ${err && err.message ? err.message : err}`);
+      return null;
+    }
+  }
+
   function bakeClip(name, keys) {
     const snaps = keys.map((k) => ({ t: k.t, snap: bakePose(k.fn) }));
     const bones = new Set();
@@ -994,7 +1004,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   const CLIPS = {
-    idle: bakeClip('idle', [
+    idle: safeClip('idle', [
       { t: 0, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
       { t: 1.2, fn: () => basePose({ breath: 1, sway: 0.7, headYaw: 0.06, headRoll: 0.03, curl: 0.16 }) },
       { t: 2.4, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0.02, curl: 0.2 }) },
@@ -1002,44 +1012,44 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       { t: 4.8, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
     ]),
     // 走路：两个步幅一个循环，首尾同帧 —— 循环起来无缝
-    walk: bakeClip('walk', Array.from({ length: 25 }, (_, i) => {
+    walk: safeClip('walk', Array.from({ length: 25 }, (_, i) => {
       const p = i / 24;
       return { t: p * WALK.T, fn: () => walkPose(p) };
     })),
-    turnL: bakeClip('turnL', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(1, k) }))),
-    turnR: bakeClip('turnR', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(-1, k) }))),
+    turnL: safeClip('turnL', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(1, k) }))),
+    turnR: safeClip('turnR', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(-1, k) }))),
     // 手指：握一下再张开（30 根一起，是“她真的在用手”的证据）
-    grip: bakeClip('grip', [
+    grip: safeClip('grip', [
       { t: 0, fn: () => basePose({ curl: 0.15 }) },
       { t: 0.35, fn: () => basePose({ curl: 0.95, elbow: 0.34, hand: 0.2, headPitch: 0.12 }) },
       { t: 0.8, fn: () => basePose({ curl: 0.95, elbow: 0.34, hand: 0.2, headPitch: 0.12 }) },
       { t: 1.3, fn: () => basePose({ curl: 0.12 }) },
     ]),
-    lookL: bakeClip('lookL', [
+    lookL: safeClip('lookL', [
       { t: 0, fn: NEUTRAL },
       { t: 0.5, fn: () => basePose({ headYaw: 0.42, headPitch: -0.05, sway: 0.3 }) },
       { t: 1.6, fn: () => basePose({ headYaw: 0.4, headPitch: -0.04, sway: 0.28 }) },
       { t: 2.4, fn: NEUTRAL },
     ]),
-    lookR: bakeClip('lookR', [
+    lookR: safeClip('lookR', [
       { t: 0, fn: NEUTRAL },
       { t: 0.5, fn: () => basePose({ headYaw: -0.42, headPitch: -0.05, sway: -0.3 }) },
       { t: 1.6, fn: () => basePose({ headYaw: -0.4, headPitch: -0.04, sway: -0.28 }) },
       { t: 2.4, fn: NEUTRAL },
     ]),
-    reachL: bakeClip('reachL', [
+    reachL: safeClip('reachL', [
       { t: 0, fn: NEUTRAL },
       { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: 0.25 }) },
       { t: 1.5, fn: () => basePose({ armL: new V(0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: 0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
-    reachR: bakeClip('reachR', [
+    reachR: safeClip('reachR', [
       { t: 0, fn: NEUTRAL },
       { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: -0.25 }) },
       { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: -0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
-    stretch: bakeClip('stretch', [
+    stretch: safeClip('stretch', [
       { t: 0, fn: NEUTRAL },
       { t: 1.0, fn: () => basePose({ armL: new V(0.42, 0.86, -0.2), armR: new V(-0.42, 0.86, -0.2), elbow: 0.22, headPitch: -0.2, breath: 0.8, curl: 0.05 }) },
       { t: 2.0, fn: () => basePose({ armL: new V(0.5, 0.8, -0.3), armR: new V(-0.5, 0.8, -0.3), elbow: 0.3, headPitch: -0.24, breath: 0.6, curl: 0.05 }) },
@@ -1050,6 +1060,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const mixer = new THREE.AnimationMixer(vrm.scene);
   const actions = {};
   for (const [name, clip] of Object.entries(CLIPS)) {
+    if (!clip) continue;
     const a = mixer.clipAction(clip);
     if (name === 'idle' || name === 'walk') a.setLoop(THREE.LoopRepeat, Infinity);
     else {
@@ -1058,7 +1069,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
     actions[name] = a;
   }
-  actions.idle.play();
+  actions.idle?.play();
   mixer.update(0); // 第一帧先摆好，否则会闪一帧 T-pose
 
   // 自检用：?freeze=0.25 停在走路的某个相位，?nav=walk 强制一直走
@@ -1093,6 +1104,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (!e.action || e.action === actions.idle) return;
     if (e.action === actions.walk) return;
     const idle = actions.idle;
+    if (!idle) return;
     idle.reset();
     idle.setEffectiveWeight(1);
     idle.play();
@@ -1361,6 +1373,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         played: actsPlayed,
         t: +t.toFixed(1),
         nav: nav.mode,
+        clipErr: clipErrors.length ? clipErrors.slice(0, 2) : null,
         cam: camera.position.toArray().map((x) => +x.toFixed(2)),
         floorY: +floorY.toFixed(3),
         travel: [+nav.travel.x.toFixed(2), +nav.travel.z.toFixed(2)],
