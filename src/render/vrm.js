@@ -212,20 +212,21 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return tex;
   }
 
+  // 地面用一张会滚动的网格贴图表示“她在往前走”；景物排成格子，
+  // 走到哪儿就从另一边绕回来 —— 这样永远不会有东西突然穿过她的身体。
+  const world = { tex: null, props: [], tile: 4.5, span: 27 };
   {
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(160, 160),
+      new THREE.PlaneGeometry(200, 200),
       new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.95, metalness: 0 }),
     );
     ground.rotation.x = -Math.PI / 2;
-    const land = new THREE.Group();
-    land.position.y = floorY;
-    stage.add(land);
     ground.position.y = 0;
-    land.add(ground);
-    scene.fog = new THREE.Fog(0x0b0d14, 5.5, 20);
+    stage.add(ground);
+    world.tex = ground.material.map;
+    stage.position.y = floorY;
+    scene.fog = new THREE.Fog(0x0b0d14, 5.5, 19);
 
-    // 固定种子：世界是稳定的，不会每帧变样
     let seed = 20261122;
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const crystalMat = new THREE.MeshStandardMaterial({ color: 0x8fd2ff, emissive: 0x2a6fa8, emissiveIntensity: 0.5, roughness: 0.3 });
@@ -233,39 +234,37 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe3b0, emissive: 0xffb35c, emissiveIntensity: 1.4 });
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a2333, roughness: 1 });
 
-    for (let i = 0; i < 90; i++) {
-      const a = rnd() * Math.PI * 2;
-      const r = 3.2 + rnd() * 34;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      const kind = rnd();
-      let m;
-      if (kind < 0.5) {
-        const h = 0.35 + rnd() * 1.4;
-        m = new THREE.Mesh(new THREE.ConeGeometry(0.16 + rnd() * 0.22, h, 6), treeMat);
-        m.position.y = h / 2;
-        const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.28, 5), trunkMat);
-        tr.position.y = 0.14;
-        m.add(tr);
-      } else if (kind < 0.82) {
-        const s0 = 0.12 + rnd() * 0.3;
-        m = new THREE.Mesh(new THREE.OctahedronGeometry(s0, 0), crystalMat);
-        m.position.y = s0 * 0.9;
-        m.rotation.y = rnd() * 3;
-      } else {
-        m = new THREE.Mesh(new THREE.SphereGeometry(0.05 + rnd() * 0.05, 8, 8), lampMat);
-        m.position.y = 0.5 + rnd() * 0.9;
+    const n = 6;
+    for (let ix = 0; ix < n; ix++) {
+      for (let iz = 0; iz < n; iz++) {
+        const bx = (ix - (n - 1) / 2) * world.tile + (rnd() - 0.5) * 1.6;
+        const bz = (iz - (n - 1) / 2) * world.tile + (rnd() - 0.5) * 1.6;
+        const kind = rnd();
+        let m;
+        if (kind < 0.55) {
+          const h = 0.35 + rnd() * 1.2;
+          m = new THREE.Mesh(new THREE.ConeGeometry(0.15 + rnd() * 0.2, h, 6), treeMat);
+          m.position.y = h / 2;
+          const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.28, 5), trunkMat);
+          tr.position.y = 0.14;
+          m.add(tr);
+        } else if (kind < 0.85) {
+          const s0 = 0.1 + rnd() * 0.26;
+          m = new THREE.Mesh(new THREE.OctahedronGeometry(s0, 0), crystalMat);
+          m.position.y = s0 * 0.9;
+          m.rotation.y = rnd() * 3;
+        } else {
+          m = new THREE.Mesh(new THREE.SphereGeometry(0.05 + rnd() * 0.05, 8, 8), lampMat);
+          m.position.y = 0.5 + rnd() * 0.9;
+        }
+        m.position.x = bx;
+        m.position.z = bz;
+        m.userData.base = new THREE.Vector2(bx, bz);
+        stage.add(m);
+        world.props.push(m);
       }
-      m.position.x = x;
-      m.position.z = z;
-      m.userData.seed = rnd();
-      land.add(m);
     }
   }
-
-  vrm.scene.traverse((o) => {
-    if (o.isMesh || o.isSkinnedMesh) o.frustumCulled = false;
-  });
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
   const V = THREE.Vector3;
@@ -1130,6 +1129,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     playAction('walk', 0.35);
   }
 
+  const wrapHalf = (v, span) => {
+    const s0 = span;
+    return ((((v + s0 / 2) % s0) + s0) % s0) - s0 / 2;
+  };
   function applyStage() {
     if (!stage) return;
     if (!Number.isFinite(nav.travel.x + nav.travel.z + nav.yaw)) {
@@ -1137,7 +1140,20 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       nav.yaw = 0;
     }
     stage.rotation.y = -nav.yaw;
-    stage.position.set(-nav.travel.x, 0, -nav.travel.z).applyAxisAngle(Y_AXIS, -nav.yaw);
+    // 地面：贴图反向滚，看起来就是地在她脚下往后走
+    if (world.tex) {
+      const rep = 24;
+      world.tex.offset.set((nav.travel.x / 200) * rep, (-nav.travel.z / 200) * rep);
+    }
+    // 景物：出了格子就从对面绕回来；离镜头太近的先收起来，免得糊在脸上
+    const camLocal = new V(0, 0, camera.position.z).applyAxisAngle(Y_AXIS, nav.yaw);
+    for (const p of world.props) {
+      p.position.x = wrapHalf(p.userData.base.x - nav.travel.x, world.span);
+      p.position.z = wrapHalf(p.userData.base.y - nav.travel.z, world.span);
+      const dx = p.position.x - camLocal.x;
+      const dz = p.position.z - camLocal.z;
+      p.visible = dx * dx + dz * dz > 2.2;
+    }
   }
 
   function driveNav(dt) {
