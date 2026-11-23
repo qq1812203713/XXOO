@@ -212,58 +212,39 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return tex;
   }
 
-  // 地面用一张会滚动的网格贴图表示“她在往前走”；景物排成格子，
-  // 走到哪儿就从另一边绕回来 —— 这样永远不会有东西突然穿过她的身体。
+  // 场景全撤了：没有地面网格、没有树、没有石头、没有草。
+  // 她是这画面里唯一的实体，脚下一圈很淡的光只负责让她“站在地上”。
   const world = { tex: null, props: [], tile: 4.5, span: 27 };
   {
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.95, metalness: 0 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = 0;
-    stage.add(ground);
-    world.tex = ground.material.map;
     stage.position.y = floorY;
-    scene.fog = new THREE.Fog(0x0b0d14, 5.5, 19);
-
-    let seed = 20261122;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    const crystalMat = new THREE.MeshStandardMaterial({ color: 0x8fd2ff, emissive: 0x2a6fa8, emissiveIntensity: 0.5, roughness: 0.3 });
-    const treeMat = new THREE.MeshStandardMaterial({ color: 0x2b4a63, roughness: 0.9 });
-    const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe3b0, emissive: 0xffb35c, emissiveIntensity: 1.4 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a2333, roughness: 1 });
-
-    const n = 6;
-    for (let ix = 0; ix < n; ix++) {
-      for (let iz = 0; iz < n; iz++) {
-        const bx = (ix - (n - 1) / 2) * world.tile + (rnd() - 0.5) * 1.6;
-        const bz = (iz - (n - 1) / 2) * world.tile + (rnd() - 0.5) * 1.6;
-        const kind = rnd();
-        let m;
-        if (kind < 0.55) {
-          const h = 0.35 + rnd() * 1.2;
-          m = new THREE.Mesh(new THREE.ConeGeometry(0.15 + rnd() * 0.2, h, 6), treeMat);
-          m.position.y = h / 2;
-          const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.28, 5), trunkMat);
-          tr.position.y = 0.14;
-          m.add(tr);
-        } else if (kind < 0.85) {
-          const s0 = 0.1 + rnd() * 0.26;
-          m = new THREE.Mesh(new THREE.OctahedronGeometry(s0, 0), crystalMat);
-          m.position.y = s0 * 0.9;
-          m.rotation.y = rnd() * 3;
-        } else {
-          m = new THREE.Mesh(new THREE.SphereGeometry(0.05 + rnd() * 0.05, 8, 8), lampMat);
-          m.position.y = 0.5 + rnd() * 0.9;
-        }
-        m.position.x = bx;
-        m.position.z = bz;
-        m.userData.base = new THREE.Vector2(bx, bz);
-        stage.add(m);
-        world.props.push(m);
-      }
-    }
+    const glowTex = (() => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const g = c.getContext('2d');
+      const rg = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+      rg.addColorStop(0, 'rgba(255,214,236,0.85)');
+      rg.addColorStop(0.45, 'rgba(240,150,200,0.26)');
+      rg.addColorStop(1, 'rgba(255,150,200,0)');
+      g.fillStyle = rg;
+      g.fillRect(0, 0, 128, 128);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    })();
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.5, 1.5),
+      new THREE.MeshBasicMaterial({
+        map: glowTex,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        opacity: 0.6,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.004;
+    glow.renderOrder = -1;
+    stage.add(glow);
   }
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
@@ -779,6 +760,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return snap;
   }
 
+  const clipErrors = [];
+  function safeClip(name, keys) {
+    try {
+      return bakeClip(name, keys);
+    } catch (err) {
+      clipErrors.push(`${name}: ${err && err.message ? err.message : err}`);
+      return null;
+    }
+  }
+
   function bakeClip(name, keys) {
     const snaps = keys.map((k) => ({ t: k.t, snap: bakePose(k.fn) }));
     const bones = new Set();
@@ -994,7 +985,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   const CLIPS = {
-    idle: bakeClip('idle', [
+    idle: safeClip('idle', [
       { t: 0, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
       { t: 1.2, fn: () => basePose({ breath: 1, sway: 0.7, headYaw: 0.06, headRoll: 0.03, curl: 0.16 }) },
       { t: 2.4, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0.02, curl: 0.2 }) },
@@ -1002,44 +993,44 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       { t: 4.8, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
     ]),
     // 走路：两个步幅一个循环，首尾同帧 —— 循环起来无缝
-    walk: bakeClip('walk', Array.from({ length: 25 }, (_, i) => {
+    walk: safeClip('walk', Array.from({ length: 25 }, (_, i) => {
       const p = i / 24;
       return { t: p * WALK.T, fn: () => walkPose(p) };
     })),
-    turnL: bakeClip('turnL', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(1, k) }))),
-    turnR: bakeClip('turnR', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(-1, k) }))),
+    turnL: safeClip('turnL', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(1, k) }))),
+    turnR: safeClip('turnR', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(-1, k) }))),
     // 手指：握一下再张开（30 根一起，是“她真的在用手”的证据）
-    grip: bakeClip('grip', [
+    grip: safeClip('grip', [
       { t: 0, fn: () => basePose({ curl: 0.15 }) },
       { t: 0.35, fn: () => basePose({ curl: 0.95, elbow: 0.34, hand: 0.2, headPitch: 0.12 }) },
       { t: 0.8, fn: () => basePose({ curl: 0.95, elbow: 0.34, hand: 0.2, headPitch: 0.12 }) },
       { t: 1.3, fn: () => basePose({ curl: 0.12 }) },
     ]),
-    lookL: bakeClip('lookL', [
+    lookL: safeClip('lookL', [
       { t: 0, fn: NEUTRAL },
       { t: 0.5, fn: () => basePose({ headYaw: 0.42, headPitch: -0.05, sway: 0.3 }) },
       { t: 1.6, fn: () => basePose({ headYaw: 0.4, headPitch: -0.04, sway: 0.28 }) },
       { t: 2.4, fn: NEUTRAL },
     ]),
-    lookR: bakeClip('lookR', [
+    lookR: safeClip('lookR', [
       { t: 0, fn: NEUTRAL },
       { t: 0.5, fn: () => basePose({ headYaw: -0.42, headPitch: -0.05, sway: -0.3 }) },
       { t: 1.6, fn: () => basePose({ headYaw: -0.4, headPitch: -0.04, sway: -0.28 }) },
       { t: 2.4, fn: NEUTRAL },
     ]),
-    reachL: bakeClip('reachL', [
+    reachL: safeClip('reachL', [
       { t: 0, fn: NEUTRAL },
       { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: 0.25 }) },
       { t: 1.5, fn: () => basePose({ armL: new V(0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: 0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
-    reachR: bakeClip('reachR', [
+    reachR: safeClip('reachR', [
       { t: 0, fn: NEUTRAL },
       { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: -0.25 }) },
       { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: -0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
-    stretch: bakeClip('stretch', [
+    stretch: safeClip('stretch', [
       { t: 0, fn: NEUTRAL },
       { t: 1.0, fn: () => basePose({ armL: new V(0.42, 0.86, -0.2), armR: new V(-0.42, 0.86, -0.2), elbow: 0.22, headPitch: -0.2, breath: 0.8, curl: 0.05 }) },
       { t: 2.0, fn: () => basePose({ armL: new V(0.5, 0.8, -0.3), armR: new V(-0.5, 0.8, -0.3), elbow: 0.3, headPitch: -0.24, breath: 0.6, curl: 0.05 }) },
@@ -1050,6 +1041,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const mixer = new THREE.AnimationMixer(vrm.scene);
   const actions = {};
   for (const [name, clip] of Object.entries(CLIPS)) {
+    if (!clip) continue;
     const a = mixer.clipAction(clip);
     if (name === 'idle' || name === 'walk') a.setLoop(THREE.LoopRepeat, Infinity);
     else {
@@ -1058,7 +1050,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
     actions[name] = a;
   }
-  actions.idle.play();
+  actions.idle?.play();
   mixer.update(0); // 第一帧先摆好，否则会闪一帧 T-pose
 
   // 自检用：?freeze=0.25 停在走路的某个相位，?nav=walk 强制一直走
@@ -1093,6 +1085,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (!e.action || e.action === actions.idle) return;
     if (e.action === actions.walk) return;
     const idle = actions.idle;
+    if (!idle) return;
     idle.reset();
     idle.setEffectiveWeight(1);
     idle.play();
@@ -1361,6 +1354,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         played: actsPlayed,
         t: +t.toFixed(1),
         nav: nav.mode,
+        clipErr: clipErrors.length ? clipErrors.slice(0, 2) : null,
         cam: camera.position.toArray().map((x) => +x.toFixed(2)),
         floorY: +floorY.toFixed(3),
         travel: [+nav.travel.x.toFixed(2), +nav.travel.z.toFixed(2)],

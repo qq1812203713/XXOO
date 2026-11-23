@@ -107,9 +107,10 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   let nerveTab = { side: 'L', part: 'body' };
 
   // 自检：把神经面板自己截下来回传，这样我能直接看到它长什么样
-  const FLAGS = globalThis.__XXOO_FLAGS__ || '';
-  const NERVE_SHOT = /nerveshot/.test(FLAGS);
-  const tabFlag = /ntab=([LR]):(hand|foot|body)/.exec(FLAGS);
+  // 自检开关只认地址栏上的 ?dev=1（页面注入的 flags 不再能让它自己弹出来）
+  const DEV = new URLSearchParams(globalThis.location?.search || '').get('dev') === '1';
+  const NERVE_SHOT = DEV;
+  const tabFlag = DEV ? /ntab=([LR]):(hand|foot|body)/.exec(globalThis.location?.search || '') : null;
   if (tabFlag) nerveTab = { side: tabFlag[1], part: tabFlag[2] };
   let lastNerveShot = 0;
   let heroTabBound = false;
@@ -143,7 +144,7 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   }
 
   $('open-nerves').addEventListener('click', () => openNerves(refs.nerves.hidden));
-  if (/nerves(=|&|$)/.test(FLAGS)) openNerves(true);
+  if (DEV) openNerves(true);
   $('open-settings').addEventListener('click', () => openSettings(true));
   for (const btn of document.querySelectorAll('[data-close]')) {
     btn.addEventListener('click', () => {
@@ -614,15 +615,15 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
       }
       return;
     }
-    // 没有 3D 身体（Live2D / 2D）时退回骨骼示意图
-    renderer.drawInspector(g2, {
-      rig,
-      pose: brain.state.pose,
-      side: nerveTab.side,
-      part: nerveTab.part,
-      width: rect.width,
-      height: rect.height,
-    });
+    // 没有 3D 身体（Live2D / 2D）时不要画那团抽象的骨架 —— 它看着像坏了
+    g2.clearRect(0, 0, rect.width, rect.height);
+    g2.font = '11px ui-sans-serif, system-ui, sans-serif';
+    g2.fillStyle = 'rgba(255,214,232,0.55)';
+    g2.textAlign = 'center';
+    g2.fillText('这具身体还是 2D 的', rect.width / 2, rect.height / 2 - 6);
+    g2.fillStyle = 'rgba(255,214,232,0.35)';
+    g2.fillText('3D 骨骼一上来，这里会显示她的真实骨头', rect.width / 2, rect.height / 2 + 12);
+    g2.textAlign = 'left';
   }
 
   function updateLog() {
