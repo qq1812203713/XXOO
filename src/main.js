@@ -175,8 +175,8 @@ function showBodyHint() {
   }
   el.hidden = false;
   el.textContent = last3DFail
-    ? `现在是 2D 立绘在撑着她 · 3D 没起来（${last3DFail}）· 碰一下屏幕会再试`
-    : '现在是 2D 立绘在撑着她 · 3D 正在重试';
+    ? `这具身体没起来（${last3DFail}）· 只剩这张地图 · 碰一下屏幕会再试`
+    : '正在把她的身体接上来…';
 }
 
 async function tryBoot3D() {
@@ -268,6 +268,7 @@ async function bootBody() {
   // 或者用户碰一下，再试一次 3D —— 成功就自动把 2D 那层换掉，不需要人刷新。
   setTimeout(startSnapshots, 900);
   showBodyHint();
+  if (bodyMode === '2d') renderer.setBodyVisible(true); // 只有我自检时才会看这具 2D 假身体
 
   if (!body3d) {
     let retrying = false;
@@ -282,6 +283,16 @@ async function bootBody() {
     window.addEventListener('pointerdown', retry);
     setTimeout(retry, 2500);
     setTimeout(retry, 9000);
+    // 一直试，直到把她接上来为止（最多 12 次，之后只在碰屏幕/回前台时试）
+    let tries = 0;
+    const iv = setInterval(() => {
+      if (body3d) {
+        clearInterval(iv);
+        return;
+      }
+      if (++tries > 12) clearInterval(iv);
+      retry();
+    }, 3500);
   }
 }
 

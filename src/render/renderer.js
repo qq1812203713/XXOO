@@ -29,7 +29,9 @@ export function createRenderer(canvas) {
   const cam = { x: 0, scale: 3, ground: 0, targetX: 0 };
   let motes = [];
   let time = 0;
-  let bodyVisible = true;
+  // 默认不画这具「2D 假身体」：3D 没起来时宁可空着，也不给她安一个假人。
+  // 真正需要它（?body=2d 自检）时再打开。
+  let bodyVisible = false;
 
   // 2D 回退时用的一张正面立绘：它比手画的骨架好看一万倍。
   // （3D 起来时不画它；WebGL 拿不到时才由它顶上。）
