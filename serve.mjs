@@ -32,6 +32,10 @@ const server = http.createServer((req, res) => {
   let rel = decodeURIComponent(url.pathname);
   if (rel.endsWith('/')) rel += 'index.html';
 
+  // 给预览一个“从没被缓存过”的入口：/play、/w 都等价于首页。
+  // 要是某个代理把 / 的旧 HTML 缓存住了，换个新路径就一定能打到源站。
+  if (rel === '/play' || rel === '/play/' || rel === '/w' || rel === '/w/') rel = '/index.html';
+
   const file = path.join(ROOT, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
   const done = (code, extra = '') => {
     const ms = Date.now() - started;
