@@ -142,27 +142,68 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
   const V = THREE.Vector3;
+  let faceYaw = 0; // 朝向校正了多少度，写进 ?debug=1 面板
+  let faceProbe = '没量到';
   const Q = THREE.Quaternion;
 
   // —— 朝向自校准 ——
-  // 不同 VRM 有的朝 +Z 有的朝 -Z，靠版本号猜总会错一次。这里直接量：
-  // 左右肩连线（她的左）= leftAxis，up = +Y，前 = left × up。
-  // 然后把整个场景转一下，保证她**一定**面对镜头。
+  // 先把身体摆到静止姿态：normalized 骨骼的**位置**要等 humanoid.update() 之后才有，
+  // 之前的版本在这里读坐标，读到的全是 (0,0,0)，校正被自己跳过了 —— 这就是“还是背对着我”。
+  vrm.update(0);
   vrm.scene.updateMatrixWorld(true);
+
   {
-    const L = new V();
-    const R = new V();
-    node('leftUpperArm')?.getWorldPosition(L);
-    node('rightUpperArm')?.getWorldPosition(R);
-    const leftAxis = L.clone().sub(R).setY(0);
-    if (leftAxis.lengthSq() > 1e-6) {
-      leftAxis.normalize();
-      const facing = new V().crossVectors(leftAxis, new V(0, 1, 0)).normalize();
-      const yaw = Math.atan2(facing.x, facing.z);
-      if (Math.abs(yaw) > 0.01) {
-        vrm.scene.rotation.y -= yaw;
-        vrm.scene.updateMatrixWorld(true);
+    const raw = (n) => {
+      try {
+        return vrm.humanoid.getRawBoneNode?.(n) || node(n) || null;
+      } catch {
+        return node(n) || null;
       }
+    };
+    // 首选：脚趾朝向（最直接地表示“她面朝哪”），退回左右肩连线
+    let yaw = null;
+    const f = new V();
+    const tt = new V();
+    raw('leftFoot')?.getWorldPosition(f);
+    raw('leftToes')?.getWorldPosition(tt);
+    const fw = tt.clone().sub(f).setY(0);
+    if (fw.lengthSq() > 1e-8) {
+      yaw = Math.atan2(fw.x, fw.z);
+    } else {
+      const L = new V();
+      const R = new V();
+      raw('leftUpperArm')?.getWorldPosition(L);
+      raw('rightUpperArm')?.getWorldPosition(R);
+      const leftAxis = L.clone().sub(R).setY(0);
+      if (leftAxis.lengthSq() > 1e-8) {
+        leftAxis.normalize();
+        const facing = new V().crossVectors(leftAxis, new V(0, 1, 0)).normalize();
+        yaw = Math.atan2(facing.x, facing.z);
+      }
+    }
+    if (yaw !== null && Math.abs(yaw) > 0.01) {
+      vrm.scene.rotation.y -= yaw;
+      vrm.scene.updateMatrixWorld(true);
+      vrm.update(0);
+    }
+    faceYaw = yaw === null ? NaN : (yaw * 180) / Math.PI;
+    if (yaw === null) {
+      // 连坐标都量不到：退回最粗暴的规则（这套模型是 -Z 朝前）
+      vrm.scene.rotation.y += Math.PI;
+      vrm.scene.updateMatrixWorld(true);
+      vrm.update(0);
+      faceProbe = '兜底 180°';
+      faceYaw = 180;
+    } else {
+      faceProbe = `${faceYaw.toFixed(1)}°`;
+    }
+    // 逃生通道：?face=180 手动决定她朝哪边，不用等我想明白
+    const forced = Number(new URLSearchParams(globalThis.location?.search || '').get('face'));
+    if (Number.isFinite(forced) && forced !== 0) {
+      vrm.scene.rotation.y += (forced * Math.PI) / 180;
+      vrm.scene.updateMatrixWorld(true);
+      vrm.update(0);
+      faceProbe = `手动 ${forced}°`;
     }
   }
 
@@ -437,6 +478,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   ];
   function debugLines() {
     const out = [];
+    out.push(`朝向：量到 ${faceProbe}（应为 180 或 0）`);
     vrm.scene.updateMatrixWorld(true);
     for (const name of DEBUG_BONES) {
       const b = node(name);
