@@ -131,7 +131,8 @@ createAnimeBody({
   .then((body) => {
     if (!body) return;
     anime = body;
-    renderer.setBodyVisible(false);
+    // 渲染器若是旧版（module 缓存混用），宁可退回 2D 也不要两具身体叠在一起
+    if (typeof renderer.setBodyVisible !== 'function') throw new Error('渲染器版本不一致，请强制刷新一次');
     girlCanvas?.classList.add('on');
     const d = document.getElementById('intro-diag');
     if (d && window.__booted) d.textContent = '已醒来 · Live2D 模型 · 点任意处进去';

@@ -6,9 +6,20 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8000);
+
+// 每次启动生成一个构建号。它不是装饰：下面会把每个 ES 模块的相对 import
+// 改写成 `./x.js?b=<构建号>`，这样浏览器/代理手里的旧模块副本永远不会被复用。
+// 之前「改了代码但你看到的还是旧页面」就是死在这里。
+const BUILD = Date.now().toString(36);
+const IMPORT_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])(\.{1,2}\/[^'"]+?\.m?js)\2/g;
+
+function bustImports(src) {
+  return src.replace(IMPORT_RE, (m, head, q, spec) => `${head}${q}${spec}?b=${BUILD}${q}`);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -54,9 +65,14 @@ const server = http.createServer((req, res) => {
       return done(404, ' ← 找不到，检查路径大小写');
     }
     const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+    let body = buf;
+    if (type.startsWith('text/javascript') && !rel.includes('/vendor/')) {
+      const rewritten = bustImports(buf.toString('utf8'));
+      if (rewritten !== buf.toString('utf8')) body = Buffer.from(rewritten, 'utf8');
+    }
     res.writeHead(200, {
       'Content-Type': type,
-      'Content-Length': buf.length,
+      'Content-Length': body.length,
       'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
       Pragma: 'no-cache',
       Expires: '0',
@@ -65,7 +81,7 @@ const server = http.createServer((req, res) => {
     if (req.method === 'HEAD') {
       res.end();
     } else {
-      res.end(buf);
+      res.end(body);
     }
     done(200);
   });
