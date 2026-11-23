@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="息 —— 住在手机里的一具神经系统：会呼吸、会累、会自己找事情做。" />
     <title>息 · XXOO</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=3" />
+    <link rel="stylesheet" href="./assets/styles.css?v=4" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%23ffb4c8' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23ffb4c8'/%3E%3C/svg%3E" />
   </head>
   <body>
@@ -125,12 +125,72 @@
           <li><b>看她</b> 什么都不做，她也会自己找事做、种东西、玩脚趾。</li>
         </ul>
         <button class="btn primary wide" id="enter">进去</button>
+        <p class="dim small center" id="intro-diag">正在唤醒…</p>
         <p class="dim small center">离开再回来，她会记得你走了多久。</p>
       </div>
     </div>
 
     <div class="toast" id="toast" hidden></div>
+    <div id="boot-note" hidden></div>
 
-    <script type="module" src="./src/main.js?v=3"></script>
+    <!-- 这一小段是「保险丝」：它先于所有模块运行。
+         哪怕 ES 模块整块挂掉，它也能让遮罩关掉、把错误写在屏幕上。 -->
+    <script>
+      (function () {
+        var problems = [];
+        function paint() {
+          var note = document.getElementById('boot-note');
+          if (!note) return;
+          note.hidden = false;
+          note.textContent = '出问题了：\n' + problems.join('\n');
+          note.style.cssText =
+            'position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;background:#5c0b22;color:#ffe6ee;' +
+            'font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;padding:10px 12px;border-radius:10px;' +
+            'white-space:pre-wrap;max-height:46vh;overflow:auto;box-shadow:0 10px 40px #000b';
+        }
+        window.__report = function (msg) {
+          problems.push(String(msg));
+          paint();
+        };
+        window.__enter = function () {
+          var intro = document.getElementById('intro');
+          if (!intro || intro.hidden) return;
+          intro.hidden = true;
+          intro.style.display = 'none';
+          try { localStorage.setItem('xxoo.intro', '1'); } catch (e) {}
+        };
+        // 捕获阶段监听：任何一次触摸/点击/按键都能进，谁也拦不住
+        ['pointerdown', 'mousedown', 'touchstart', 'click', 'keydown'].forEach(function (t) {
+          window.addEventListener(t, function () {
+            var intro = document.getElementById('intro');
+            if (intro && !intro.hidden) window.__enter();
+          }, true);
+        });
+        // 兜底：20 秒后自己进（她不该被一张说明卡关在里面）
+        setTimeout(function () { window.__enter(); }, 20000);
+
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          if (t && t !== window && t.tagName && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+            window.__report('资源没加载上：' + (t.src || t.href));
+          } else if (e && e.message) {
+            window.__report('脚本错误：' + e.message + (e.filename ? '\n  ' + e.filename.replace(/^.*\//, '') + ':' + e.lineno : ''));
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          window.__report('未处理的异常：' + (r && (r.message || r)));
+        });
+
+        setTimeout(function () {
+          var diag = document.getElementById('intro-diag');
+          if (!window.__booted) {
+            window.__report('主程序 3 秒内没有启动。可能就是浏览器拦了模块脚本，或者某个文件加载失败。');
+            if (diag) diag.textContent = '没醒来（见下方红字）';
+          }
+        }, 3000);
+      })();
+    </script>
+    <script type="module" src="./src/main.js?v=4"></script>
   </body>
 </html>

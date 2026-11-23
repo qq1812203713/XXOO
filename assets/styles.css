@@ -10,6 +10,8 @@
   --glass: rgba(16, 10, 22, 0.72);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
 }
 
 * {
@@ -596,16 +598,29 @@ input {
   position: fixed;
   inset: 0;
   z-index: 30;
-  display: grid;
-  place-items: center;
-  padding: 22px;
+  /* 用 flex + margin:auto 做“安全居中”：视口太矮时卡片可以滚动，
+     「进去」按钮永远不会被裁到屏幕外面去。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px calc(18px + var(--safe-r)) calc(18px + var(--safe-b)) calc(18px + var(--safe-l));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: radial-gradient(circle at 50% 30%, rgba(60, 22, 60, 0.85), rgba(6, 4, 10, 0.97) 60%);
   backdrop-filter: blur(3px);
 }
 
 .intro-card {
   width: min(400px, 100%);
+  margin: auto;
   text-align: left;
+}
+
+@media (max-height: 640px) {
+  .intro h1 { font-size: 48px; }
+  .lead { margin-bottom: 12px; }
+  .tips { margin-bottom: 14px; gap: 5px; }
+  .intro-card .dim.small { display: none; }
 }
 
 .eyebrow {

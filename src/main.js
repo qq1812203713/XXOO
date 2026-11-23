@@ -16,6 +16,10 @@ import { createUI } from './ui/ui.js';
 
 // 任何未捕获的错误都直接写在屏幕上，而不是留一个黑屏让人猜
 function showFatal(message) {
+  if (window.__report) {
+    window.__report(message);
+    return;
+  }
   let el = document.getElementById('fatal');
   if (!el) {
     el = document.createElement('div');
@@ -162,3 +166,8 @@ function loop(now) {
 brain.tick(1 / 60, { pointer: null, petting: false });
 renderer.resize();
 requestAnimationFrame(loop);
+
+// 报到：告诉页面“我活着”，并让开场卡显示实际画布尺寸（排查时一眼就能看明白）
+window.__booted = true;
+const diag = document.getElementById('intro-diag');
+if (diag) diag.textContent = `已醒来 · 画面 ${canvas.clientWidth}×${canvas.clientHeight} · 点任意处进去`;
