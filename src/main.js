@@ -324,7 +324,9 @@ function hudNote(msg) {
       if (j.build && j.build !== BUILD && !document.getElementById('stale')) {
         const btn = document.createElement('button');
         btn.id = 'stale';
-        btn.textContent = '有新版本，点此刷新';
+        btn.textContent = '有新版本，正在自动刷新…';
+        // 不再让用户手动刷新：3 秒后自己更新（存档每 5 秒落一次，不会丢）
+        setTimeout(() => location.reload(), 3000);
         btn.style.cssText =
           'position:fixed;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:80;' +
           'padding:8px 16px;border-radius:999px;border:1px solid rgba(255,159,190,.6);background:rgba(90,18,42,.92);' +
