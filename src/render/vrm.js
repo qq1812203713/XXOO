@@ -139,6 +139,17 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   // 不再调用 VRMUtils.rotateVRM0：它会按版本号偷偷转半圈，转没转无从得知。
   // 朝向统一由下面的实测决定，只有一个入口。
+  // 头发/裙子的弹簧骨：默认关掉。
+  // 我们每帧都在改写骨架，弹簧在这套“被驱动的骨架”上极容易自激振荡，
+  // 屏幕上就是头发乱甩、身体抽搐。关掉后头发刚性跟随头部，稳定第一。
+  // 想看弹簧：地址加 ?spring=1
+  try {
+    const KEEP_SPRING = new URLSearchParams(globalThis.location?.search || '').get('spring') === '1';
+    if (!KEEP_SPRING) vrm.springBoneManager = null;
+  } catch {
+    /* 关不掉就算了 */
+  }
+
   // 模型挂在一个外壳上：转动外壳，永远不怕别处改写 vrm.scene.rotation
   // 注意：旧版本在这里存过“累计偏移”，那是在校正本身还错的时候按出来的，
   // 现在校正已经对了，再叠加就等于把对的结果又转回去。
@@ -301,13 +312,26 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const aq = new Map(); // name -> 累积的世界增量（相对静止姿态）
   const IDENT = new Q();
 
+  // 平滑：每根骨真正写入的四元数会朝目标慢慢追上。
+  // 数据层再抖，屏幕上也是连续的 —— 抽搐基本都出在这个环节。
+  const SMOOTH = 14; // 每秒追上多少（越大越跟手）
+  const applied = new Map();
+  const tmpQ = new Q();
   function writeLocal(name, targetWorldQ) {
     const b = node(name);
     if (!b) return;
     const pName = PARENT.get(name);
     const parentQ = pName ? (wq.get(pName) || restWorldQ.get(pName) || IDENT) : IDENT;
     const local = parentQ.clone().invert().multiply(targetWorldQ);
-    b.quaternion.copy(local);
+    const prev = applied.get(name);
+    const k = 1 - Math.exp(-SMOOTH * Math.max(dt || 0, 0.001));
+    if (prev && k < 1) {
+      prev.slerp(local, Math.min(1, k));
+      b.quaternion.copy(prev);
+    } else {
+      b.quaternion.copy(local);
+      applied.set(name, local.clone());
+    }
     wq.set(name, targetWorldQ);
   }
 
@@ -355,7 +379,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const BACK = new V(0, 0, -1);
   const DOWN = new V(0, -1, 0);
 
-  function poseFromRig(brain, face, dt) {
+  let dt = 0; // 当前帧时长，writeLocal 的平滑用
+  function poseFromRig(brain, face, frameDt) {
+    dt = frameDt;
     t += dt;
     const p = brain.state.pose;
     if (!p) return;
@@ -376,12 +402,22 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const neck = j('neck');
     const head = j('head');
 
-    turn('hips', { x: 0, y: gazeX * 0.1, z: -(pelvis?.a || 0) * 0.5 });
-    turn('spine', { x: 0, y: 0, z: -(spine1?.a || 0) * 0.8 });
-    turn('chest', { x: gazeY * 0.04, y: 0, z: -(chest?.a || 0) * 0.9 });
-    turn('upperChest', { x: 0, y: 0, z: -(chest?.a || 0) * 0.35 });
-    turn('neck', { x: -gazeY * 0.16, y: gazeX * 0.3, z: -(neck?.a || 0) * 0.8 });
-    turn('head', { x: -gazeY * 0.24, y: gazeX * 0.5, z: -(head?.a || 0) * 1.0 });
+    // 就算大脑在发呆，身体也不能像雕像：呼吸、重心、视线游移
+    const breath = Math.sin(t * 1.15);
+    const sway = Math.sin(t * 0.29);
+    const swaySlow = Math.sin(t * 0.13 + 1.1);
+    const glance = Math.sin(t * 0.23) * 0.6 + Math.sin(t * 0.61 + 0.7) * 0.4;
+
+    turn('hips', { x: 0, y: gazeX * 0.1 + sway * 0.07, z: -(pelvis?.a || 0) * 0.5 + swaySlow * 0.035 });
+    turn('spine', { x: breath * 0.012, y: swaySlow * 0.05, z: -(spine1?.a || 0) * 0.8 });
+    turn('chest', { x: gazeY * 0.04 + breath * 0.035, y: 0, z: -(chest?.a || 0) * 0.9 });
+    turn('upperChest', { x: breath * 0.02, y: 0, z: -(chest?.a || 0) * 0.35 });
+    turn('neck', { x: -gazeY * 0.16 + breath * 0.01, y: gazeX * 0.3 + glance * 0.12, z: -(neck?.a || 0) * 0.8 });
+    turn('head', {
+      x: -gazeY * 0.24 + breath * 0.02,
+      y: gazeX * 0.5 + glance * 0.22,
+      z: -(head?.a || 0) * 1.0 + sway * 0.04,
+    });
 
     // —— 手臂：先定上臂的世界方向，再依次“指向”前臂、手、每一节指骨 ——
     for (const side of ['L', 'R']) {
