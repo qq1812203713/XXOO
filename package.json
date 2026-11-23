@@ -5,7 +5,7 @@
   "type": "module",
   "description": "息 —— 一具住在浏览器里的身体：神经、驱力、记忆与一个会自己长大的世界。",
   "scripts": {
-    "start": "python3 -m http.server 8000 --bind 0.0.0.0",
+    "start": "node serve.mjs",
     "test": "node test/fuse.test.mjs && node test/sim.test.mjs && node test/dom.test.mjs",
     "sim-test": "node test/sim.test.mjs",
     "dom-test": "node test/dom.test.mjs",
