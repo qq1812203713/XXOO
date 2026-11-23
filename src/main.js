@@ -13,6 +13,7 @@ import { createCortex } from './brain/cortex.js';
 import { createBrain } from './brain/brain.js';
 import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
+import { hasWebGL } from './render/gl.js';
 import { createAnimeBody } from './render/live2d.js';
 import { create3DBody } from './render/vrm.js';
 
@@ -148,7 +149,9 @@ const girlCanvas = document.getElementById('girl');
 const girl3dCanvas = document.getElementById('girl3d');
 const bodyMode = (() => {
   try {
-    return new URLSearchParams(location.search).get('body'); // ?body=2d|live2d|vrm
+    const q = new URLSearchParams(location.search);
+    const f = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
+    return q.get('body') || f.get('body') || null; // ?body=2d|live2d|vrm（.flags 里也能写，方便我自己看 2D 那层）
   } catch {
     return null;
   }
@@ -160,49 +163,81 @@ function markAwake(label) {
   if (d && window.__booted) d.textContent = `已醒来 · ${label} · 点任意处进去`;
 }
 
+let last3DFail = '';
+
+function showBodyHint() {
+  const el = document.getElementById('bodyhint');
+  if (!el) return;
+  if (body3d) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.hidden = false;
+  el.textContent = last3DFail
+    ? `这具身体没起来（${last3DFail}）· 只剩这张地图 · 碰一下屏幕会再试`
+    : '正在把她的身体接上来…';
+}
+
+async function tryBoot3D() {
+  if (body3d) return true;
+  try {
+    const body = await create3DBody({
+      canvas: girl3dCanvas,
+      modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
+      onStatus: (msg) => {
+        const el = document.getElementById('ver');
+        if (el) el.dataset.status = msg;
+      },
+    });
+    if (!body) {
+      // 这里以前是静默失败 —— 直接掉回 2D，谁也不知道为什么
+      last3DFail = `hasWebGL=${hasWebGL() ? 'yes' : 'no'}`;
+      reportToServer(`3D 没起来：${last3DFail}`, 'boot3d');
+      showBodyHint();
+      return false;
+    }
+    body3d = body;
+    document.getElementById('flip')?.addEventListener('click', () => {
+      const deg = body3d?.turnBody?.(180);
+      hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
+    });
+    if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
+    girlCanvas?.classList.remove('on'); // 3D 起来就把 2D / Live2D 那层彻底关掉
+    girl3dCanvas?.classList.add('on');
+    last3DFail = '';
+    showBodyHint();
+    markAwake('3D 身体（VRM）');
+    setTimeout(startSnapshots, 900);
+    setTimeout(() => {
+      try {
+        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+      } catch (err) {
+        reportToServer(`state failed: ${err}`, 'state');
+      }
+    }, 2500);
+    setInterval(() => {
+      try {
+        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+      } catch {
+        /* ignore */
+      }
+    }, 6000);
+    log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
+    return true;
+  } catch (err) {
+    const msg = `3D：${err && err.stack ? err.stack : err}`;
+    bodyErrors.push(msg);
+    last3DFail = `hasWebGL=${hasWebGL() ? 'yes' : 'no'} · ${String(err && err.message ? err.message : err).slice(0, 46)}`;
+    reportToServer(msg, 'boot3d');
+    showBodyHint();
+    return false;
+  }
+}
+
 async function bootBody() {
   if (bodyMode !== '2d' && bodyMode !== 'live2d') {
-    try {
-      body3d = await create3DBody({
-        canvas: girl3dCanvas,
-        modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
-        onStatus: (msg) => {
-          const el = document.getElementById('ver');
-          if (el) el.dataset.status = msg;
-        },
-      });
-      if (body3d) {
-        document.getElementById('flip')?.addEventListener('click', () => {
-          const deg = body3d?.turnBody?.(180);
-          hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
-        });
-        if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
-        girl3dCanvas?.classList.add('on');
-        markAwake('3D 身体（VRM）');
-        setTimeout(startSnapshots, 900);
-        setTimeout(() => {
-          try {
-            reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
-          } catch (err) {
-            reportToServer(`state failed: ${err}`, 'state');
-          }
-        }, 2500);
-        // 每 6 秒回传一次内部状态（在演哪段动作），我据此判断她到底有没有在动
-        setInterval(() => {
-          try {
-            reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
-          } catch {
-            /* ignore */
-          }
-        }, 6000);
-        log.push({ layer: 'render', motor: 'body', text: '换上了 3D 身体：VRM / Alicia。' });
-        return;
-      }
-    } catch (err) {
-      const msg = `3D：${err && err.stack ? err.stack : err}`;
-      bodyErrors.push(msg);
-      reportToServer(msg, 'boot3d');
-    }
+    if (await tryBoot3D()) return;
   }
 
   if (bodyMode !== '2d') {
@@ -227,6 +262,37 @@ async function bootBody() {
 
   if (bodyErrors.length) {
     window.__report?.(`身体的 3D / Live2D 都没起来，继续用 2D 骨架：\n  ${bodyErrors.join('\n  ')}`);
+  }
+
+  // 手机上很常见：页面在后台/被遮住时 WebGL 拿不到上下文。所以等它回到前台、
+  // 或者用户碰一下，再试一次 3D —— 成功就自动把 2D 那层换掉，不需要人刷新。
+  setTimeout(startSnapshots, 900);
+  showBodyHint();
+  if (bodyMode === '2d') renderer.setBodyVisible(true); // 只有我自检时才会看这具 2D 假身体
+
+  if (!body3d) {
+    let retrying = false;
+    const retry = async () => {
+      if (body3d || retrying || document.hidden) return;
+      retrying = true;
+      const ok = await tryBoot3D();
+      retrying = false;
+      if (!ok) reportToServer('3D 重试后仍然没起来', 'boot3d');
+    };
+    document.addEventListener('visibilitychange', retry);
+    window.addEventListener('pointerdown', retry);
+    setTimeout(retry, 2500);
+    setTimeout(retry, 9000);
+    // 一直试，直到把她接上来为止（最多 12 次，之后只在碰屏幕/回前台时试）
+    let tries = 0;
+    const iv = setInterval(() => {
+      if (body3d) {
+        clearInterval(iv);
+        return;
+      }
+      if (++tries > 12) clearInterval(iv);
+      retry();
+    }, 3500);
   }
 }
 
@@ -276,13 +342,14 @@ let lastSave = performance.now();
 
 // —— 自动留档：加载完成后隔几秒抓几帧传回服务器，我能直接看到画面 ——
 function startSnapshots() {
+  if (typeof location === 'undefined') return; // 离线测试里没有 window
   const qs = new URLSearchParams([location.search.replace(/^\?/, ''), globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'));
   if (qs.get('shot') === '0') return;
   const every = Math.max(0.15, parseFloat(qs.get('every')) || 1.4) * 1000;
   let n = 0;
   const timer = setInterval(() => {
     n += 1;
-    const data = body3d?.snapshot?.();
+    const data = body3d?.snapshot?.() || renderer.snapshot?.();
     if (data) {
       fetch('./shot', {
         method: 'POST',

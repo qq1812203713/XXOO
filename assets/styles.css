@@ -87,6 +87,20 @@ input {
   opacity: 1;
 }
 
+/* 3D 没起来时的一行小字：说清现在是哪一层在撑着她，点屏幕会重试。 */
+#bodyhint {
+  position: fixed;
+  left: 14px;
+  bottom: 82px;
+  z-index: 4;
+  max-width: 62vw;
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: rgba(255, 208, 228, 0.4);
+  pointer-events: none;
+}
+
 /* ————— 顶部 ————— */
 .hud {
   position: fixed;
@@ -400,7 +414,10 @@ input {
 }
 
 #inspector {
+  display: block;
   width: 100%;
+  max-width: 340px; /* 宽屏上也不要摊成一张巨幅骨架 */
+  margin: 0 auto;
   height: auto;
   aspect-ratio: 300 / 260;
   border-radius: 12px;
@@ -828,7 +845,7 @@ input {
     right: 0;
     bottom: 0;
     width: 100%;
-    height: 68vh;
+    height: 56vh;
     border-left: 0;
     border-top: 1px solid var(--line);
     border-radius: 18px 18px 0 0;
