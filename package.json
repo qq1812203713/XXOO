@@ -15,7 +15,7 @@
     "vrm-test": "node test/vrm.test.mjs"
   },
   "devDependencies": {
-    "@napi-rs/canvas": "^0.1.88",
+    "@napi-rs/canvas": "^0.1.100",
     "@pixiv/three-vrm": "^3.5.5",
     "jsdom": "^26.1.0",
     "live2dcubismcore": "^1.0.2",

@@ -3,8 +3,8 @@
 import { GROUND_Y } from '../body/skeleton.js';
 import { clamp, damp, lerp, rand, TAU } from '../core/util.js';
 
-const HEAD_RX = 7.0;
-const HEAD_RY = 8.6;
+const HEAD_RX = 8.8;
+const HEAD_RY = 10.4;
 
 const SKIN = { light: 'rgba(255,240,242,0.97)', mid: 'rgba(250,205,220,0.95)', dark: 'rgba(210,146,176,0.95)' };
 const HAIR = { mid: 'rgba(52,26,46,0.85)', light: 'rgba(150,80,112,0.55)', edge: 'rgba(255,196,226,0.22)' };
@@ -30,6 +30,16 @@ export function createRenderer(canvas) {
   let motes = [];
   let time = 0;
   let bodyVisible = true;
+
+  // 2D 回退时用的一张正面立绘：它比手画的骨架好看一万倍。
+  // （3D 起来时不画它；WebGL 拿不到时才由它顶上。）
+  let girlSprite = null;
+  if (typeof Image === 'function') {
+    girlSprite = new Image();
+    girlSprite.decoding = 'async';
+    girlSprite.src = './assets/girl.png';
+  }
+  const SPRITE_H = 148; // 立绘在世界里的高度（单位：世界单位，她约 1.5 米）
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -337,78 +347,159 @@ export function createRenderer(canvas) {
     }
   }
 
+  // 皮肤与衣服：她是一具会呼吸的身体，不是一张解剖图。
+  const SKIN_C = { light: '#FFF4F6', mid: '#FBD3DF', dark: '#E4A9BF' };
+  const CLOTH_C = { hi: '#FFFFFF', mid: '#F7F3FD', lo: '#D9CFEE' };
+  const RIBBON_C = '#F7A6C6';
+
   function drawVolume(rig, pose) {
     const pel = pose.get('pelvis');
     const s1 = pose.get('spine1');
     const s2 = pose.get('spine2');
     const ch = pose.get('chest');
     const nk = pose.get('neck');
-    const shL = pose.get('arm_L_upper');
-    const shR = pose.get('arm_R_upper');
     if (!pel || !ch) return;
 
-    const grad = ctx.createLinearGradient(-34, 0, 34, 0);
-    grad.addColorStop(0, 'rgba(255,232,244,0.34)');
-    grad.addColorStop(0.4, 'rgba(252,208,232,0.26)');
-    grad.addColorStop(1, 'rgba(176,150,235,0.13)');
-    const rim = 'rgba(255,240,250,0.18)';
+    const skin = ctx.createLinearGradient(pel.x - 14, pel.y - 66, pel.x + 14, pel.y + 72);
+    skin.addColorStop(0, SKIN_C.light);
+    skin.addColorStop(0.4, SKIN_C.mid);
+    skin.addColorStop(1, SKIN_C.dark);
 
-    // 躯干（腰稍微收一点）+ 脖子
-    strip([pel, s1, s2, ch, nk, pose.get('head')], [10.8, 9.0, 9.8, 13.2, 3.6, 3.0], grad, rim);
-    // 三角肌：把手臂接在肩膀上，而不是浮着
-    ctx.fillStyle = 'rgba(255,216,238,0.15)';
-    for (const sh of [shL, shR]) {
+    const cloth = ctx.createLinearGradient(pel.x - 16, ch.y - 6, pel.x + 16, pel.y + 20);
+    cloth.addColorStop(0, CLOTH_C.hi);
+    cloth.addColorStop(0.55, CLOTH_C.mid);
+    cloth.addColorStop(1, CLOTH_C.lo);
+
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    // —— 腿 —— //
+    for (const side of ['L', 'R']) {
+      const hip = pose.get(`leg_${side}_thigh`);
+      const kn = pose.get(`leg_${side}_shin`);
+      const an = pose.get(`foot_${side}`);
+      if (!hip || !kn || !an) continue;
+      strip([hip, kn, an], [5.3, 4.0, 2.6], skin, null, { capStart: false, capEnd: false });
+      ctx.save();
+      ctx.translate(an.x, an.y);
+      ctx.rotate(an.a * 0.3);
+      const shoe = ctx.createLinearGradient(0, -2, 0, 9);
+      shoe.addColorStop(0, '#FFFFFF');
+      shoe.addColorStop(0.6, '#F2EDFB');
+      shoe.addColorStop(1, '#CEC4E5');
+      ctx.fillStyle = shoe;
       ctx.beginPath();
-      ctx.arc(sh.x, sh.y + 2, 2.7, 0, TAU);
+      ctx.ellipse(0, 5.4, 2.9, 5.6, 0, 0, TAU);
       ctx.fill();
+      ctx.restore();
     }
 
+    // —— 躯干：连衣裙上身 —— //
+    strip([pel, s1, s2, ch], [11.2, 9.2, 9.6, 12.6], cloth, null, { capStart: false, capEnd: false });
+
+    // 胸口一点高光，让白裙子有体积
+    const shine = ctx.createRadialGradient(ch.x - 3, ch.y - 1, 0.5, ch.x - 1, ch.y + 2, 11);
+    shine.addColorStop(0, 'rgba(255,255,255,0.85)');
+    shine.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = shine;
+    ctx.beginPath();
+    ctx.ellipse(ch.x - 2, ch.y + 1, 9, 8, 0, 0, TAU);
+    ctx.fill();
+
+    // —— 裙摆 —— //
+    const hem = pel.y + 16.5;
+    ctx.beginPath();
+    ctx.moveTo(pel.x - 10.4, pel.y - 4.5);
+    ctx.bezierCurveTo(pel.x - 6.5, pel.y + 3, pel.x - 17.5, hem - 8, pel.x - 16.2, hem);
+    ctx.quadraticCurveTo(pel.x, hem + 3.4, pel.x + 16.2, hem);
+    ctx.bezierCurveTo(pel.x + 17.5, hem - 8, pel.x + 6.5, pel.y + 3, pel.x + 10.4, pel.y - 4.5);
+    ctx.closePath();
+    const skirt = ctx.createLinearGradient(pel.x, pel.y - 4, pel.x, hem + 3);
+    skirt.addColorStop(0, CLOTH_C.hi);
+    skirt.addColorStop(0.7, CLOTH_C.mid);
+    skirt.addColorStop(1, '#E6DEF6');
+    ctx.fillStyle = skirt;
+    ctx.fill();
+    // 裙褶：几道很淡的竖线
+    ctx.strokeStyle = 'rgba(160,144,196,0.22)';
+    ctx.lineWidth = 0.45;
+    for (const k of [-0.62, -0.2, 0.2, 0.62]) {
+      ctx.beginPath();
+      ctx.moveTo(pel.x + k * 8, pel.y - 1);
+      ctx.quadraticCurveTo(pel.x + k * 12, hem - 5, pel.x + k * 14.5, hem + 0.4);
+      ctx.stroke();
+    }
+    // 裙摆底边的一道亮边
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    ctx.moveTo(pel.x - 16.2, hem - 0.4);
+    ctx.quadraticCurveTo(pel.x, hem + 3, pel.x + 16.2, hem - 0.4);
+    ctx.stroke();
+
+    // —— 脖子 —— //
+    if (nk) strip([ch, nk, pose.get('head') || nk], [3.1, 2.6, 2.3], skin, null, { capStart: false });
+
+    // —— 手臂 + 泡泡袖 + 手 —— //
     for (const side of ['L', 'R']) {
       const sh = pose.get(`arm_${side}_upper`);
       const el = pose.get(`arm_${side}_fore`);
       const wr = pose.get(`hand_${side}`);
-      const hip = pose.get(`leg_${side}_thigh`);
-      const kn = pose.get(`leg_${side}_shin`);
-      const an = pose.get(`foot_${side}`);
+      if (!sh || !el || !wr) continue;
 
-      strip([sh, el, wr], [3.2, 2.3, 1.8], grad, 'rgba(255,238,248,0.10)', { capStart: false });
-      strip([hip, kn, an], [4.7, 3.4, 2.6], grad, 'rgba(255,238,248,0.10)', { capStart: false });
+      strip([sh, el, wr], [2.9, 2.2, 1.7], skin, null, { capStart: false });
+
+      // 泡泡袖：把手臂接到裙子上，而不是浮着
+      ctx.save();
+      ctx.translate(sh.x * 0.9 + ch.x * 0.1, sh.y * 0.9 + ch.y * 0.1);
+      ctx.rotate(0);
+      const puff = ctx.createRadialGradient(-1.4, -1.6, 0.6, 0, 0, 6);
+      puff.addColorStop(0, '#FFFFFF');
+      puff.addColorStop(1, CLOTH_C.lo);
+      ctx.fillStyle = puff;
+      ctx.beginPath();
+      ctx.ellipse(0, 0.6, 5.1, 4.6, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
 
       // 手掌
       ctx.save();
       ctx.translate(wr.x, wr.y);
       ctx.rotate(wr.a);
-      ctx.fillStyle = 'rgba(235,225,255,0.10)';
+      ctx.fillStyle = skin;
       ctx.beginPath();
-      ctx.ellipse(0, 2.8, 3.4, 4.8, 0, 0, TAU);
+      ctx.ellipse(0, 3.0, 2.9, 4.2, 0, 0, TAU);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,240,250,0.12)';
-      ctx.lineWidth = 0.4;
-      ctx.stroke();
-      ctx.restore();
-
-      // 脚
-      ctx.save();
-      ctx.translate(an.x, an.y + 5.4);
-      ctx.rotate(an.a * 0.3);
-      ctx.fillStyle = 'rgba(226,222,255,0.12)';
+      // 四根手指 + 拇指
+      ctx.strokeStyle = SKIN_C.mid;
+      ctx.lineWidth = 1.3;
+      for (let i = 0; i < 4; i++) {
+        const fx = -2.0 + i * 1.35;
+        ctx.beginPath();
+        ctx.moveTo(fx, 5.2);
+        ctx.quadraticCurveTo(fx * 1.18, 7.4, fx * 1.3, 9.0 - Math.abs(i - 1.5) * 0.5);
+        ctx.stroke();
+      }
       ctx.beginPath();
-      ctx.ellipse(0, 0, 5.2, 3.4, 0, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,240,250,0.12)';
-      ctx.lineWidth = 0.4;
+      ctx.moveTo(-2.6, 2.2);
+      ctx.quadraticCurveTo(-4.0, 3.4, -3.6, 5.2);
       ctx.stroke();
       ctx.restore();
     }
 
-    // 髋：最后画，把两条腿的接缝盖住
-    ctx.fillStyle = 'rgba(255,214,236,0.11)';
+    // —— 领口的丝带 —— //
+    ctx.fillStyle = RIBBON_C;
     ctx.beginPath();
-    ctx.ellipse(pel.x, pel.y + 1.5, 11.5, 6.6, 0, 0, TAU);
+    ctx.moveTo(ch.x, ch.y + 4.2);
+    ctx.quadraticCurveTo(ch.x - 4.6, ch.y + 1.4, ch.x - 4.2, ch.y + 5.4);
+    ctx.quadraticCurveTo(ch.x - 3.4, ch.y + 7.2, ch.x, ch.y + 4.2);
+    ctx.moveTo(ch.x, ch.y + 4.2);
+    ctx.quadraticCurveTo(ch.x + 4.6, ch.y + 1.4, ch.x + 4.2, ch.y + 5.4);
+    ctx.quadraticCurveTo(ch.x + 3.4, ch.y + 7.2, ch.x, ch.y + 4.2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,240,250,0.12)';
-    ctx.lineWidth = 0.4;
-    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ch.x, ch.y + 4.4, 1.15, 0, TAU);
+    ctx.fill();
   }
 
   function drawNerves(bones) {
@@ -577,6 +668,7 @@ export function createRenderer(canvas) {
     ctx.save();
     ctx.translate(h.x, h.y);
     ctx.rotate(h.a);
+    ctx.scale(HEAD_RX / 7, HEAD_RY / 8.6);
 
     // 腮红
     if (f.blush > 0.02) {
@@ -704,9 +796,23 @@ export function createRenderer(canvas) {
     ctx.fill();
   }
 
+  function drawSprite(pose, t) {
+    const pel = pose.get('pelvis');
+    if (!pel || !girlSprite || !girlSprite.naturalWidth) return false;
+    const w = SPRITE_H * (girlSprite.naturalWidth / girlSprite.naturalHeight);
+    const bob = Math.sin(t * 1.15) * 0.85 + Math.sin(t * 2.7) * 0.25;
+    const sway = Math.sin(t * 0.52) * 0.013;
+    ctx.save();
+    ctx.translate(pel.x, GROUND_Y + 0.5);
+    ctx.rotate(sway);
+    ctx.drawImage(girlSprite, -w / 2, -SPRITE_H + bob, w, SPRITE_H);
+    ctx.restore();
+    return true;
+  }
+
   function drawBody(rig, pose, face, t, mood) {
+    if (drawSprite(pose, t)) return;
     drawVolume(rig, pose);
-    const bones = bonesOf(rig, pose);
 
     // 心跳核心
     const chest = pose.get('chest');
@@ -920,6 +1026,23 @@ export function createRenderer(canvas) {
   return {
     setBodyVisible(v) {
       bodyVisible = !!v;
+    },
+    setSprite(img) {
+      girlSprite = img;
+    },
+    // 抓一帧（2D 层整张画布），用来上传给服务器看「她到底长什么样」。
+    snapshot(maxW = 820) {
+      try {
+        const w = Math.min(maxW, W);
+        const h = Math.round((H / W) * w);
+        const c2 = document.createElement('canvas');
+        c2.width = w;
+        c2.height = h;
+        c2.getContext('2d').drawImage(canvas, 0, 0, w, h);
+        return c2.toDataURL('image/jpeg', 0.85);
+      } catch {
+        return '';
+      }
     },
     resize,
     draw,

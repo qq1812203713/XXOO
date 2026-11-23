@@ -149,7 +149,9 @@ const girlCanvas = document.getElementById('girl');
 const girl3dCanvas = document.getElementById('girl3d');
 const bodyMode = (() => {
   try {
-    return new URLSearchParams(location.search).get('body'); // ?body=2d|live2d|vrm
+    const q = new URLSearchParams(location.search);
+    const f = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
+    return q.get('body') || f.get('body') || null; // ?body=2d|live2d|vrm（.flags 里也能写，方便我自己看 2D 那层）
   } catch {
     return null;
   }
@@ -159,6 +161,22 @@ const bodyErrors = [];
 function markAwake(label) {
   const d = document.getElementById('intro-diag');
   if (d && window.__booted) d.textContent = `已醒来 · ${label} · 点任意处进去`;
+}
+
+let last3DFail = '';
+
+function showBodyHint() {
+  const el = document.getElementById('bodyhint');
+  if (!el) return;
+  if (body3d) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.hidden = false;
+  el.textContent = last3DFail
+    ? `现在是 2D 立绘在撑着她 · 3D 没起来（${last3DFail}）· 碰一下屏幕会再试`
+    : '现在是 2D 立绘在撑着她 · 3D 正在重试';
 }
 
 async function tryBoot3D() {
@@ -174,7 +192,9 @@ async function tryBoot3D() {
     });
     if (!body) {
       // 这里以前是静默失败 —— 直接掉回 2D，谁也不知道为什么
-      reportToServer(`3D 没起来：hasWebGL=${hasWebGL() ? 'yes' : 'no'}`, 'boot3d');
+      last3DFail = `hasWebGL=${hasWebGL() ? 'yes' : 'no'}`;
+      reportToServer(`3D 没起来：${last3DFail}`, 'boot3d');
+      showBodyHint();
       return false;
     }
     body3d = body;
@@ -185,6 +205,8 @@ async function tryBoot3D() {
     if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
     girlCanvas?.classList.remove('on'); // 3D 起来就把 2D / Live2D 那层彻底关掉
     girl3dCanvas?.classList.add('on');
+    last3DFail = '';
+    showBodyHint();
     markAwake('3D 身体（VRM）');
     setTimeout(startSnapshots, 900);
     setTimeout(() => {
@@ -206,7 +228,9 @@ async function tryBoot3D() {
   } catch (err) {
     const msg = `3D：${err && err.stack ? err.stack : err}`;
     bodyErrors.push(msg);
+    last3DFail = `hasWebGL=${hasWebGL() ? 'yes' : 'no'} · ${String(err && err.message ? err.message : err).slice(0, 46)}`;
     reportToServer(msg, 'boot3d');
+    showBodyHint();
     return false;
   }
 }
@@ -242,6 +266,9 @@ async function bootBody() {
 
   // 手机上很常见：页面在后台/被遮住时 WebGL 拿不到上下文。所以等它回到前台、
   // 或者用户碰一下，再试一次 3D —— 成功就自动把 2D 那层换掉，不需要人刷新。
+  setTimeout(startSnapshots, 900);
+  showBodyHint();
+
   if (!body3d) {
     let retrying = false;
     const retry = async () => {
@@ -304,13 +331,14 @@ let lastSave = performance.now();
 
 // —— 自动留档：加载完成后隔几秒抓几帧传回服务器，我能直接看到画面 ——
 function startSnapshots() {
+  if (typeof location === 'undefined') return; // 离线测试里没有 window
   const qs = new URLSearchParams([location.search.replace(/^\?/, ''), globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'));
   if (qs.get('shot') === '0') return;
   const every = Math.max(0.15, parseFloat(qs.get('every')) || 1.4) * 1000;
   let n = 0;
   const timer = setInterval(() => {
     n += 1;
-    const data = body3d?.snapshot?.();
+    const data = body3d?.snapshot?.() || renderer.snapshot?.();
     if (data) {
       fetch('./shot', {
         method: 'POST',

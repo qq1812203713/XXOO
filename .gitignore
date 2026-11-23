@@ -3,3 +3,5 @@ test/shots/
 .DS_Store
 *.log
 shots/
+tools/out/
+.flags
