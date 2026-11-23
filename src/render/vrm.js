@@ -147,9 +147,46 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   // 这个模型到底有哪些表情 —— 不查表写死，直接问它自己。
   // （写死的名字如果不在这具模型里，setValue 会安静地什么也不干，看起来就是「没有表情」。）
-  const AVAILABLE_EXPR = new Set(
-    Object.keys(vrm.expressionManager?.expressionMap || {}).map((k) => String(k).toLowerCase()),
-  );
+  // 这具模型是老 VRM0，three-vrm 会把老名字翻成新名字：
+  //   a→aa  i→ih  u→ou  e→ee  o→oh   joy→happy  sorrow→sad  fun→relaxed
+  // 以前我们直接 setValue('joy', …)：名字对不上，three-vrm 就安静地什么都不做 ——
+  // 所以「没有表情」不是权重太小，是名字根本不存在。
+  const EXPR_ALIAS = {
+    joy: ['happy', 'joy'],
+    sorrow: ['sad', 'sorrow'],
+    fun: ['relaxed', 'fun'],
+    angry: ['angry'],
+    neutral: ['neutral'],
+    blink: ['blink'],
+    a: ['aa', 'a'],
+    i: ['ih', 'i'],
+    u: ['ou', 'u'],
+    e: ['ee', 'e'],
+    o: ['oh', 'o'],
+  };
+  const EXPR_NAME = {}; // 我们说的名字 → 这具模型真名（没有就是 null）
+  (() => {
+    const em = vrm.expressionManager;
+    let keys = [];
+    try {
+      keys = Object.keys(em?.expressionMap || {});
+      if (!keys.length) keys = (em?.expressions || []).map((e) => e.expressionName);
+    } catch {
+      keys = [];
+    }
+    const lower = new Map(keys.map((k) => [String(k).toLowerCase(), k]));
+    for (const [want, aliases] of Object.entries(EXPR_ALIAS)) {
+      let hit = null;
+      for (const a of aliases) {
+        const k = lower.get(a.toLowerCase());
+        if (k) {
+          hit = k;
+          break;
+        }
+      }
+      EXPR_NAME[want] = hit;
+    }
+  })();
 
   // 不再调用 VRMUtils.rotateVRM0：它会按版本号偷偷转半圈，转没转无从得知。
   // 朝向统一由下面的实测决定，只有一个入口。
@@ -537,6 +574,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     sad: { sorrow: 0.84 },
     startled: { angry: 0.2, joy: 0.12 },
   };
+  let moodOverride = null; // 自检用：?mood=happy
   let blinkNext = 2.4;
   let blinkLeft = 0;
   let mouthPhase = 0;
@@ -559,7 +597,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const em = vrm.expressionManager;
     if (em) {
       // —— 情绪：朝目标慢慢靠，别硬切 ——
-      const mood = brain?.state?.mood || 'calm';
+      const mood = moodOverride || brain?.state?.mood || 'calm';
       const target = EMO[mood] || EMO.calm;
       const k = 1 - Math.exp(-4.5 * d);
       for (const key of Object.keys(FACE_W)) {
@@ -569,7 +607,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
           // 情绪峰值时再多给一点点，别让她永远停在“标准微笑”
           FACE_W[key] = clamp(FACE_W[key] + 0.0, 0, 1);
         }
-        if (AVAILABLE_EXPR.has(key)) em.setValue(key, clamp(FACE_W[key], 0, 1));
+        const kn = EXPR_NAME[key];
+        if (kn) em.setValue(kn, clamp(FACE_W[key], 0, 1));
       }
 
       // —— 眨眼：自己的节奏（2~6 秒一次，偶尔连眨两下）——
@@ -583,7 +622,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const auto = blinkLeft > 0 ? Math.sin((1 - blinkLeft / 0.14) * Math.PI) : 0;
       const eyeMid = clamp(1 - (f.eyeOpen ?? 1), 0, 1);
       const sleep = mood === 'sleepy' ? 0.45 : 0;
-      em.setValue('blink', clamp(Math.max(auto, eyeMid, (f.blink ?? 0)) + sleep, 0, 1));
+      if (EXPR_NAME.blink) em.setValue(EXPR_NAME.blink, clamp(Math.max(auto, eyeMid, (f.blink ?? 0)) + sleep, 0, 1));
 
       // —— 说话：嘴形在 a/i/u/e/o 之间走，不是开合 ——
       const talking = (brain?.state?.talking || 0) > 0 ? 1 : 0;
@@ -596,12 +635,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       for (const v of VOWELS) {
         const want = v === VOWELS[mouthIdx] ? env : 0;
         MOUTH_W[v] += (want - MOUTH_W[v]) * (1 - Math.exp(-14 * d));
-        if (AVAILABLE_EXPR.has(v)) em.setValue(v, clamp(MOUTH_W[v], 0, 1));
+        const vn = EXPR_NAME[v];
+        if (vn) em.setValue(vn, clamp(MOUTH_W[v], 0, 1));
       }
       // 不说话的抿嘴笑：joy 高的时候嘴巴有一点形状
       if (!talking) {
         const smile = clamp(FACE_W.joy * 0.22, 0, 1);
-        if (AVAILABLE_EXPR.has('a')) em.setValue('a', Math.max(MOUTH_W.a, smile * 0.5));
+        if (EXPR_NAME.a) em.setValue(EXPR_NAME.a, Math.max(MOUTH_W.a, smile * 0.5));
       }
     }
 
@@ -629,10 +669,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       return;
     }
     headNode.getWorldPosition(tmpV3);
-    // 推近到离头 0.42 m —— 睫毛、瞳孔、腮红都在这个距离上才看得见
-    const near = tmpV3.clone().add(new V(0, height * 0.01, FRONT * 0.42));
+    // 头的骨点在下颌附近 —— 往上看一点，才是「脸」在画面正中
+    const faceAt = tmpV3.clone().add(new V(0, height * 0.055, 0));
+    // 0.62 m：整张脸装得下，睫毛和瞳孔还看得清（0.42 时脸会出框）
+    const near = faceAt.clone().add(new V(0, height * 0.012, FRONT * 0.62));
     camera.position.lerpVectors(camHome.pos, near, faceView);
-    const lookAt = new V().lerpVectors(camHome.tgt, tmpV3, faceView);
+    const lookAt = new V().lerpVectors(camHome.tgt, faceAt, faceView);
     camera.lookAt(lookAt);
   }
 
@@ -1030,12 +1072,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       elbow = 0.16,
       hand = 0.08,
       curl = 0.14,
+      bend = 0, // 弯腰：整条脊柱往前折，不是只低头
     } = cfg;
 
-    turn('hips', { x: 0, y: sway * 0.05, z: sway * 0.022 });
-    turn('spine', { x: breath * 0.012, y: sway * 0.03, z: 0 });
-    turn('chest', { x: breath * 0.03, y: headYaw * 0.2, z: sway * 0.012 });
-    turn('upperChest', { x: breath * 0.02, y: headYaw * 0.16, z: 0 });
+    turn('hips', { x: bend * 0.1, y: sway * 0.05, z: sway * 0.022 });
+    turn('spine', { x: breath * 0.012 + bend * 0.36, y: sway * 0.03, z: 0 });
+    turn('chest', { x: breath * 0.03 + bend * 0.26, y: headYaw * 0.2, z: sway * 0.012 });
+    turn('upperChest', { x: breath * 0.02 + bend * 0.16, y: headYaw * 0.16, z: 0 });
     turn('neck', { x: headPitch * 0.3, y: headYaw * 0.3, z: headRoll * 0.3 });
     turn('head', { x: headPitch * 0.6, y: headYaw * 0.62, z: headRoll * 0.6 });
 
@@ -1133,6 +1176,35 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: -0.25 }) },
       { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: -0.3 }) },
       { t: 2.3, fn: NEUTRAL },
+    ]),
+    // 这几个是「听得懂人话」的那部分：你让她弯腰、点头、摇头、挥手，她真的会做
+    bow: safeClip('bow', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.55, fn: () => basePose({ bend: 0.9, headPitch: 0.3, elbow: 0.2, curl: 0.18, breath: -0.2 }) },
+      { t: 1.3, fn: () => basePose({ bend: 1.0, headPitch: 0.34, elbow: 0.2, curl: 0.18, breath: -0.2 }) },
+      { t: 2.1, fn: NEUTRAL },
+    ]),
+    nod: safeClip('nod', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.2, fn: () => basePose({ headPitch: 0.34 }) },
+      { t: 0.42, fn: () => basePose({ headPitch: -0.04 }) },
+      { t: 0.64, fn: () => basePose({ headPitch: 0.3 }) },
+      { t: 0.9, fn: NEUTRAL },
+    ]),
+    shake: safeClip('shake', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.22, fn: () => basePose({ headYaw: 0.36 }) },
+      { t: 0.48, fn: () => basePose({ headYaw: -0.36 }) },
+      { t: 0.74, fn: () => basePose({ headYaw: 0.24 }) },
+      { t: 1.0, fn: NEUTRAL },
+    ]),
+    wave: safeClip('wave', [
+      { t: 0, fn: NEUTRAL },
+      { t: 0.45, fn: () => basePose({ armR: new V(-0.62, 0.55, -0.25), elbow: 1.05, hand: 0.2, curl: 0.02, headPitch: -0.06 }) },
+      { t: 0.85, fn: () => basePose({ armR: new V(-0.78, 0.42, -0.2), elbow: 1.15, hand: 0.28, curl: 0.02, headPitch: -0.06 }) },
+      { t: 1.25, fn: () => basePose({ armR: new V(-0.52, 0.62, -0.3), elbow: 1.0, hand: 0.16, curl: 0.02, headPitch: -0.04 }) },
+      { t: 1.7, fn: () => basePose({ armR: new V(-0.7, 0.5, -0.24), elbow: 1.1, hand: 0.26, curl: 0.02 }) },
+      { t: 2.2, fn: NEUTRAL },
     ]),
     stretch: safeClip('stretch', [
       { t: 0, fn: NEUTRAL },
@@ -1472,6 +1544,17 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     nerveFrame,
     // 她把镜头拉近到自己脸上（细节模式）
     setFaceView,
+    // 自检用：直接播一段动作 / 钉住一个情绪
+    play(name) {
+      if (!actions[name]) return false;
+      playAction(name, 0.15);
+      nav.until = t + 3;
+      return true;
+    },
+    setMoodOverride(m) {
+      moodOverride = m || null;
+      return moodOverride;
+    },
     get faceView() {
       return faceViewTo;
     },
@@ -1526,11 +1609,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         arms: { L: deg('armLA'), R: deg('armRA'), foreL: deg('foreLA'), foreR: deg('foreRA'), handL: deg('handLA'), handR: deg('handRA') },
         rightUpperArm: q('rightUpperArm'),
         expr: Object.fromEntries(
-          ['joy', 'fun', 'sorrow', 'angry', 'blink', 'a'].map((k) => [
-            k,
-            +(vrm.expressionManager?.getValue?.(k) ?? 0).toFixed(2),
-          ]),
+          ['joy', 'fun', 'sorrow', 'angry', 'blink', 'a'].map((k) => {
+            const nm = EXPR_NAME[k];
+            const v = nm ? vrm.expressionManager?.getValue?.(nm) : null;
+            return [k, +(Number(v) || 0).toFixed(2)];
+          }),
         ),
+        exprNames: EXPR_NAME,
         spine: q('spine'),
         restDirArm: rest.rightUpperArm?.dir ? rest.rightUpperArm.dir.toArray().map((v) => +v.toFixed(3)) : null,
       };

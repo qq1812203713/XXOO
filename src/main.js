@@ -216,6 +216,13 @@ async function tryBoot3D() {
     // ?face=1（或写在 .flags 里）：一进来就是看脸模式，方便我自己核对细节
     try {
       const f = new URLSearchParams([location.search.replace(/^\?/, ''), globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'));
+      const act = f.get('act');
+      if (act) {
+        body3d.play(act);
+        setInterval(() => body3d?.play(act), 4200); // 自检：一直重播，方便我抓帧
+      }
+      const mood = f.get('mood');
+      if (mood) body3d.setMoodOverride(mood);
       if (f.get('face') === '1') {
         body3d.setFaceView(true);
         document.getElementById('faceview')?.classList.add('on');
@@ -238,7 +245,12 @@ async function tryBoot3D() {
     }, 2500);
     setInterval(() => {
       try {
-        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+        const st = body3d?.debugState?.() ?? {};
+        st.llm = { on: cortex.shouldUseLLM(), busy: cortex.busy, err: cortex.lastError, base: cortex.cfg.baseUrl, model: cortex.cfg.model, keyLen: (cortex.cfg.key || '').length };
+        st.goal = brain?.state?.goal?.type || 'idle';
+        st.bodyWish = brain?.state?.bodyWish?.clip || null;
+        st.mood = brain?.state?.mood || '';
+        reportToServer(JSON.stringify(st), 'state');
       } catch {
         /* ignore */
       }
