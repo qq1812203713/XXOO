@@ -185,6 +185,7 @@ function currentModelKey() {
   return 'alicia';
 }
 const modelKey = currentModelKey();
+const MODEL_SELECT_TITLE = (k) => `${MODELS[k]?.cn || k} · ${MODELS[k]?.note || ''}`;
 
 function showBodyHint() {
   const el = document.getElementById('bodyhint');
@@ -243,20 +244,24 @@ async function tryBoot3D() {
       document.getElementById('faceview')?.classList.toggle('on', !!on);
       hudNote(on ? '推近 · 看她的脸' : '退回全身');
     });
-    const modelBtn = document.getElementById('model');
-    if (modelBtn) {
-      modelBtn.textContent = MODELS[modelKey]?.cn || '建模';
-      modelBtn.title = `${MODELS[modelKey]?.cn || ''} · ${MODELS[modelKey]?.note || ''} —— 点一下换下一具`;
-      modelBtn.addEventListener('click', () => {
-        const i = MODEL_ORDER.indexOf(modelKey);
-        const next = MODEL_ORDER[(i + 1) % MODEL_ORDER.length];
+    // 换身体：下拉选择，选中就换
+    const modelSel = document.getElementById('model');
+    if (modelSel) {
+      modelSel.innerHTML = MODEL_ORDER.map(
+        (k) => `<option value="${k}">${MODELS[k]?.cn || k}</option>`,
+      ).join('');
+      modelSel.value = modelKey;
+      const opt = modelSel.querySelector(`option[value="${modelKey}"]`);
+      modelSel.title = opt ? MODEL_SELECT_TITLE(modelKey) : '换一具身体';
+      modelSel.addEventListener('change', () => {
+        const next = modelSel.value;
         try {
           globalThis.localStorage?.setItem(MODEL_KEY, next);
         } catch {
           /* ignore */
         }
         hudNote(`换身体 · ${MODELS[next]?.cn || next}（重新加载中）`);
-        setTimeout(() => location.reload(), 420);
+        setTimeout(() => location.reload(), 360);
       });
     }
     document.getElementById('flip')?.addEventListener('click', () => {
@@ -290,6 +295,7 @@ async function tryBoot3D() {
     } catch {
       /* ignore */
     }
+    setTimeout(resizeAll, 150); // 3D 起来之后按真实可用高度重排一次（输入框会占掉底部）
     markAwake('3D 身体（VRM）');
     setTimeout(startSnapshots, 900);
     setTimeout(() => {

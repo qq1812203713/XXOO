@@ -93,8 +93,10 @@ const EXPRESSIONS = {
 export const MODELS = {
   alicia: { url: './vendor/model/alicia/AliciaSolid.vrm', cn: '爱丽丝', note: 'VRoid 官方 · 白裙金发' },
   sampleA: { url: './vendor/model/sampleA/AvatarSample_A.vrm', cn: '小明', note: 'VRoid 官方样张 A · 制服' },
+  victoria: { url: './vendor/model/victoria/Victoria_Rubin.vrm', cn: '维多利亚', note: 'Victoria Rubin · 成熟体型' },
+  vita: { url: './vendor/model/vita/Vita.vrm', cn: '薇塔', note: 'Vita · 曲线' },
 };
-export const MODEL_ORDER = ['alicia', 'sampleA'];
+export const MODEL_ORDER = ['alicia', 'sampleA', 'victoria', 'vita'];
 
 export const REQUIRED_BONES = (() => {
   const out = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftEye', 'rightEye'];
@@ -468,6 +470,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const size = box.getSize(new V());
   const height = size.y || 1.55;
+  // 每具建模的静止站姿都不一样（有的自带屈膝）。载入后会算出「腿伸直」要抬多少，
+  // 这里先占个位，镜头按「抬高之后」的身高构图。
+  let STANCE = 0;
+  // 腿的长短不一样：步幅/抬脚/下沉都按腿长等比缩放，否则矮个子走起来像半蹲
+  let LEG_SCALE = 1;
 
   let t = 0;
   let ready = false;
@@ -480,12 +487,27 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const h = canvas.clientHeight || window.innerHeight || 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    // 竖屏手机里她应该占满画面（原来她只占 2/3，上下全是黑）
-    // 脚也要在画面里（上一版把她的小腿切掉了）
-    // 上下各留一点余量：她的鞋尖之前正好被画面底边切掉
-    const visH = height * 1.16;
-    const dist = visH / (2 * Math.tan(camera.fov / 2 / DEG));
-    camera.position.set(0, height * 0.57, FRONT * dist);
+    // 竖向构图：脚不能被底下的输入框挡住。
+    // 先量出输入框有多高，再从画面里把这块让出去，剩下的区域正好装下她的全身。
+    let barH = 0;
+    try {
+      const bar = globalThis.document?.querySelector('.composer');
+      if (bar && bar.getBoundingClientRect) {
+        const r = bar.getBoundingClientRect();
+        if (r.height > 0) barH = r.height + 18; // 输入框上方再留一点呼吸
+      }
+    } catch {
+      /* 没有 DOM 就算了 */
+    }
+    const padFrac = clamp(barH / h, 0, 0.3);
+    const usable = 1 - padFrac;
+    const span = (height + STANCE) * 1.04;
+    const dist = span / (2 * Math.tan(camera.fov / 2 / DEG)) / usable;
+    // 把她的中心对到「可用区域」的正中 —— 也就是整体往画面上方挪 padFrac/2
+    const worldPerScreen = 2 * dist * Math.tan(camera.fov / 2 / DEG);
+    const lift = (padFrac / 2) * worldPerScreen;
+    const centerY = height * 0.5 - lift;
+    camera.position.set(0, centerY + height * 0.045, FRONT * dist);
     // 自检用：?view=side / ?view=back 转到侧面看轮廓（判断弯腰、迈步对不对，正面会透视压缩看不出真形）
     let sideView = 0;
     try {
@@ -500,9 +522,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       /* ignore */
     }
     if (sideView) camera.position.applyAxisAngle(new V(0, 1, 0), sideView);
-    camera.lookAt(0, height * 0.52, 0);
+    camera.lookAt(0, centerY, 0);
     camHome.pos.copy(camera.position);
-    camHome.tgt.set(0, height * 0.52, 0);
+    camHome.tgt.set(0, centerY, 0);
     camera.updateProjectionMatrix();
   }
   layout();
@@ -1023,11 +1045,30 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       footDir: rest[`${s}Foot`].dir.clone(),
     };
   }
+  // —— 站姿归一化 ——
+  // 有的模型自带屈膝站姿（比如 VRoid 样张 A），如果不处理，换身体之后就一直是半蹲着走路。
+  // 做法：算出「腿伸直」时胯应该在多高，把胯（和整条上身）抬到那个高度，脚不动。
+  for (const s of ['left', 'right']) {
+    const L = LEG[s];
+    if (!L) continue;
+    STANCE = Math.max(STANCE, L.ankle.y + (L.L1 + L.L2) * 0.995 - L.hip.y);
+  }
+  STANCE = clamp(STANCE, 0, 0.12);
+  if (STANCE > 0) for (const s of ['left', 'right']) if (LEG[s]) LEG[s].hip.y += STANCE;
+
   // 胯可以平移（弯腰时屁股往后坐）：记住原始位置，好还原
   const HIPS_REST = (() => {
     const h = node('hips');
-    return h ? h.position.clone() : new V();
+    const p0 = h ? h.position.clone() : new V();
+    p0.y += STANCE;
+    return p0;
   })();
+  if (STANCE > 0) {
+    const h = node('hips');
+    if (h) h.position.copy(HIPS_REST);
+  }
+  LEG_SCALE = ((LEG.left ? LEG.left.L1 + LEG.left.L2 : 0.78) || 0.78) / 0.78;
+  layout(); // 身高变了，镜头按新的身高重排一次
   // 把胯挪到 (0, -drop, +back)，返回位移量给腿部 IK 用
   const hipOffset = new V();
   function shiftHips(back = 0, drop = 0) {
@@ -1063,32 +1104,44 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     aim(`${s}LowerLeg`, ankleP.clone().sub(kneeP).normalize());
   }
 
-  const WALK = { T: 1.05, stride: 0.26, lift: 0.055, duty: 0.62, sink: 0.035 };
+  const WALK = {
+    T: 1.05,
+    stride: 0.26 * LEG_SCALE,
+    lift: 0.055 * LEG_SCALE,
+    duty: 0.62,
+    sink: 0.035 * LEG_SCALE,
+  };
   WALK.speed = (WALK.stride * 2) / WALK.T; // 米/秒 —— 步子多大就走多快，脚不打滑
 
   // 一个完整的步态周期：p=0 右脚跟着地
-  function gaitLeg(s, p, cfg = WALK) {
+  // 一只脚在一个步态周期里的位置（相对髋的前后位移 z、离地高度 y、脚掌俯仰）
+  function gaitFoot(p, cfg = WALK) {
+    if (p < cfg.duty) {
+      // 支撑相：脚定在地上，身体相对它往前过去 —— 这就是「不打滑」
+      const u = p / cfg.duty;
+      return {
+        z: -cfg.stride / 2 + cfg.stride * u,
+        y: 0,
+        pitch: u < 0.18 ? ((0.18 - u) / 0.18) * 0.26 : u > 0.72 ? -((u - 0.72) / 0.28) * 0.5 : 0,
+      };
+    }
+    // 摆动相：抬脚、往前送
+    const u = (p - cfg.duty) / (1 - cfg.duty);
+    const e = u * u * (3 - 2 * u);
+    return {
+      z: cfg.stride / 2 - cfg.stride * e,
+      y: cfg.lift * Math.sin(Math.PI * u),
+      pitch: -0.18 + 0.42 * e,
+    };
+  }
+
+  function gaitLeg(s, p, cfg = WALK, hipOff = null) {
     const L = LEG[s];
     if (!L) return;
     const base = L.ankle;
-    let z;
-    let y = base.y;
-    let pitch;
-    if (p < cfg.duty) {
-      // 支撑相：脚定在地上，相对身体往后走 —— 这就是“不打滑”的关键
-      const u = p / cfg.duty;
-      z = -cfg.stride / 2 + cfg.stride * u;
-      pitch = u < 0.18 ? ((0.18 - u) / 0.18) * 0.26 : u > 0.72 ? -((u - 0.72) / 0.28) * 0.5 : 0;
-    } else {
-      // 摆动相：抬脚、往前送
-      const u = (p - cfg.duty) / (1 - cfg.duty);
-      const e = u * u * (3 - 2 * u);
-      z = cfg.stride / 2 - cfg.stride * e;
-      y = base.y + cfg.lift * Math.sin(Math.PI * u);
-      pitch = -0.18 + 0.42 * e;
-    }
-    solveLeg(s, new V(base.x, y, base.z + z), cfg.sink);
-    aim(`${s}Foot`, rotateAround(L.footDir, X_AXIS, pitch));
+    const f = gaitFoot(p, cfg);
+    solveLeg(s, new V(base.x, base.y + f.y, base.z + f.z), 0, hipOff);
+    aim(`${s}Foot`, rotateAround(L.footDir, X_AXIS, f.pitch));
   }
 
   // 手指：30 根，逐节卷曲。轴要跟着手腕一起转，否则手指会朝反方向翻。
@@ -1216,8 +1269,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const NEUTRAL = () => basePose({});
 
   function walkPose(p) {
-    shiftHips(0, 0); // 走路时胯回正（否则上一段动作的位移会残留）
     const s2 = Math.sin(2 * Math.PI * p);
+    // 骨盆高度由「支撑脚」决定：脚离髋越远，骨盆越低、膝越弯。
+    // 以前骨盆高度是写死的，脚一迈出去腿就有富余，于是永远半蹲着走路。
+    const legLen = (LEG.left ? LEG.left.L1 + LEG.left.L2 : 0.78) * 0.995;
+    const dz = Math.max(
+      Math.abs(gaitFoot(p % 1).z),
+      Math.abs(gaitFoot((p + 0.5) % 1).z),
+    );
+    const drop = Math.max(0, legLen - Math.sqrt(Math.max(1e-4, legLen * legLen - dz * dz)));
+    const hipOff = shiftHips(0, drop);
     // 走路是往前走的：躯干往前 3° 左右，头保持水平（眼睛看前面）
     turn('hips', { x: FWD(0.03), y: -s2 * 0.06, z: s2 * 0.035 });
     turn('spine', { x: FWD(0.02), y: s2 * 0.04, z: -s2 * 0.015 });
@@ -1225,8 +1286,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     turn('upperChest', { x: 0, y: s2 * 0.03 });
     turn('neck', { x: FWD(-0.02) });
     turn('head', { x: FWD(-0.04), y: -s2 * 0.05 });
-    gaitLeg('left', p % 1);
-    gaitLeg('right', (p + 0.5) % 1);
+    gaitLeg('left', p % 1, WALK, hipOff);
+    gaitLeg('right', (p + 0.5) % 1, WALK, hipOff);
     // 手臂与同侧的腿反向摆
     const swingDir = (bs) => rotateAround(ARM_HANG[bs === 'right' ? 'L' : 'R'], X_AXIS, s2 * 0.42 * (bs === 'right' ? 1 : -1));
     poseArm('right', swingDir('right'), 0.3, 0.12, 0.25);
@@ -1767,6 +1828,30 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       };
       return {
         springOn,
+        stance: +STANCE.toFixed(3),
+        legScale: +LEG_SCALE.toFixed(2),
+        legs: (() => {
+          const L = LEG.left;
+          if (!L) return null;
+          const a = node('leftUpperLeg');
+          const b = node('leftLowerLeg');
+          const c = node('leftFoot');
+          if (!a || !b || !c) return null;
+          const pa = new THREE.Vector3();
+          const pb = new THREE.Vector3();
+          const pc = new THREE.Vector3();
+          a.getWorldPosition(pa);
+          b.getWorldPosition(pb);
+          c.getWorldPosition(pc);
+          const v1 = pb.clone().sub(pa).normalize();
+          const v2 = pc.clone().sub(pb).normalize();
+          return {
+            kneeDeg: +((Math.acos(clamp(v1.dot(v2), -1, 1)) * 180) / Math.PI).toFixed(0),
+            hipY: +pa.y.toFixed(3),
+            ankleY: +pc.y.toFixed(3),
+            span: +(L.L1 + L.L2).toFixed(3),
+          };
+        })(),
         hipPos: node('hips') ? node('hips').position.toArray().map((v) => +v.toFixed(3)) : null,
         hipRest: HIPS_REST.toArray().map((v) => +v.toFixed(3)),
         clipT: +(actions[current]?.time || 0).toFixed(2),
