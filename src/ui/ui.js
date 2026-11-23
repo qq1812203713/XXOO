@@ -187,8 +187,9 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
       const err = cortex.lastError || '没有任何返回';
       status.textContent =
         `失败：${err}。\n` +
-        '请求已经绕开浏览器直连（走本地 /llm 代理），所以不再是跨域问题：' +
-        '多半是 Key 不对、地址写错（要写到 /v1 为止）、或模型名不存在。';
+        '「直连 … Failed to fetch」= 浏览器被跨域挡住（或地址写错、http/https 混用）；' +
+        '「代理 …」也不行的话，说明这台机器的服务器没法出网。' +
+        '地址请写到 /v1 为止，例如 https://api.openai.com/v1。';
     }
   });
 

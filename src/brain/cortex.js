@@ -134,21 +134,58 @@ export function createCortex({ settings, log } = {}) {
         { role: 'user', content: statePrompt(payload) },
       ];
       const model = cfg.model || 'gpt-4o-mini';
-      // 走同源代理：浏览器直连第三方 API 基本都会被 CORS 拦成 Failed to fetch
-      const viaProxy = !cfg.direct && globalThis.location?.protocol?.startsWith('http');
-      const res = viaProxy
-        ? await fetch('./llm', {
-            method: 'POST',
-            signal: ctrl.signal,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ baseUrl: base, key: cfg.key, model, messages }),
-          })
-        : await fetch(`${base}/chat/completions`, {
-            method: 'POST',
-            signal: ctrl.signal,
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.key}` },
-            body: JSON.stringify({ model, temperature: 0.95, max_tokens: 220, messages }),
-          });
+      const canProxy = globalThis.location?.protocol?.startsWith('http');
+
+      // 直连优先：你的浏览器在公网，能出去；本机服务器可能没有出网权限。
+      // 直连被 CORS 拦时，再试同源 /llm 代理。
+      const attempts = [
+        {
+          name: '直连',
+          run: () =>
+            fetch(`${base}/chat/completions`, {
+              method: 'POST',
+              signal: ctrl.signal,
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.key}` },
+              body: JSON.stringify({ model, temperature: 0.95, max_tokens: 220, messages }),
+            }),
+        },
+      ];
+      if (canProxy) {
+        attempts.push({
+          name: '代理',
+          run: () =>
+            fetch('./llm', {
+              method: 'POST',
+              signal: ctrl.signal,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ baseUrl: base, key: cfg.key, model, messages }),
+            }),
+        });
+      }
+
+      const errors = [];
+      let res = null;
+      for (const attempt of attempts) {
+        try {
+          const r = await attempt.run();
+          if (r.ok) {
+            res = r;
+            break;
+          }
+          let detail = '';
+          try {
+            const j = await r.json();
+            const e = j?.error;
+            detail = typeof e === 'string' ? e : String(e?.message || j?.message || '');
+          } catch {
+            /* 上游没回 JSON */
+          }
+          errors.push(`${attempt.name} HTTP ${r.status}${detail ? `：${detail}` : ''}`);
+        } catch (err) {
+          errors.push(`${attempt.name} ${err && err.message ? err.message : err}`);
+        }
+      }
+      if (!res) throw new Error(errors.join(' / '));
       if (!res.ok) {
         let detail = '';
         try {
