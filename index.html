@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#07050c" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="息 —— 住在手机里的一具神经系统：会呼吸、会累、会自己找事情做。" />
+    <title>息 · XXOO</title>
+    <link rel="stylesheet" href="./assets/styles.css?v=3" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%23ffb4c8' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23ffb4c8'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <canvas id="stage" aria-label="息的世界"></canvas>
+    <noscript><p style="position:fixed;inset:0;display:grid;place-items:center;color:#f4e9f1">需要开启 JavaScript 才能见到她。</p></noscript>
+
+    <div class="bubble" id="bubble" hidden>
+      <span id="bubble-text"></span>
+    </div>
+
+    <header class="hud">
+      <div class="brand">
+        <span class="pulse" id="pulse"></span>
+        <div class="brand-text">
+          <b>息</b>
+          <span id="hud-state">独自待着</span>
+        </div>
+      </div>
+      <div class="hud-actions">
+        <button class="chip" id="speed" title="时间流速">1×</button>
+        <button class="chip" id="open-nerves">神经</button>
+        <button class="chip" id="open-settings">设置</button>
+      </div>
+    </header>
+
+    <aside class="drives" id="drives" aria-label="内在状态"></aside>
+
+    <footer class="composer">
+      <input id="say" type="text" placeholder="对她说点什么…" autocomplete="off" enterkeyhint="send" maxlength="160" />
+      <button id="send" aria-label="说">说</button>
+    </footer>
+
+    <aside class="panel nerves" id="nerves" hidden aria-label="神经系统">
+      <div class="panel-head">
+        <div>
+          <h2>神经系统</h2>
+          <p class="dim" id="nerve-goal">—</p>
+        </div>
+        <button class="x" data-close="nerves" aria-label="关闭">×</button>
+      </div>
+
+      <div class="tabs" id="nerve-tabs">
+        <button data-side="L" data-part="hand">左手</button>
+        <button data-side="R" data-part="hand">右手</button>
+        <button data-side="L" data-part="foot">左脚</button>
+        <button data-side="R" data-part="foot">右脚</button>
+      </div>
+      <canvas id="inspector" width="300" height="220"></canvas>
+      <p class="dim small" id="inspector-hint">青色亮点 = 正在被驱动的关节</p>
+
+      <div class="legend">
+        <span><i class="l-brain"></i>意图</span>
+        <span><i class="l-cere"></i>小脑</span>
+        <span><i class="l-motor"></i>运动程序</span>
+        <span><i class="l-reflex"></i>反射</span>
+        <span><i class="l-face"></i>表情</span>
+      </div>
+
+      <ol class="log" id="motor-log"></ol>
+    </aside>
+
+    <div class="sheet" id="settings" hidden>
+      <div class="sheet-card">
+        <div class="panel-head">
+          <h2>设置</h2>
+          <button class="x" data-close="settings" aria-label="关闭">×</button>
+        </div>
+
+        <label class="switch">
+          <input type="checkbox" id="llm-enabled" />
+          <span>让大模型接管她的语言与念头</span>
+        </label>
+        <p class="dim small">关闭时使用本地心智：不联网、不花钱、永远在线。开启后她说话更自由，但需要你自备一个 OpenAI 兼容接口。</p>
+
+        <label class="field">
+          <span>接口地址</span>
+          <input id="llm-base" type="text" placeholder="https://api.openai.com/v1" />
+        </label>
+        <label class="field">
+          <span>模型</span>
+          <input id="llm-model" type="text" placeholder="gpt-4o-mini" />
+        </label>
+        <label class="field">
+          <span>API Key（只存在这台设备）</span>
+          <input id="llm-key" type="password" placeholder="sk-…" autocomplete="off" />
+        </label>
+        <p class="dim small" id="llm-hint"></p>
+
+        <div class="row">
+          <button class="btn primary" id="save-settings">保存</button>
+          <button class="btn danger" id="reset">清空她的一切</button>
+        </div>
+
+        <details class="about">
+          <summary>这个东西是怎么搭起来的</summary>
+          <p>
+            五层结构：<b>伺服</b>（每根骨头的弹簧）→ <b>运动程序</b>（手、脚、腿、躯干各一个脚本，脚趾每个都有独立相位）→
+            <b>脑干</b>（呼吸/眨眼/重心）→ <b>驱力</b>（疲倦、好奇、想见你、不安、心跳）→ <b>皮层</b>（语言与念头）。
+            大脑只说“想要”，身体自己决定怎么做到。存档在她的浏览器里，离线时她也在生活。
+          </p>
+        </details>
+      </div>
+    </div>
+
+    <div class="intro" id="intro">
+      <div class="intro-card">
+        <p class="eyebrow">XXOO / 第一具原型</p>
+        <h1>息</h1>
+        <p class="lead">她住在这里。没有任务，没有服务，只有一具身体和一点自己的念头。</p>
+        <ul class="tips">
+          <li><b>戳她</b> 头、手、脚 —— 你会看到反射先于想法。</li>
+          <li><b>摸她</b> 按住并移动 —— 她会安静下来。</li>
+          <li><b>看她</b> 什么都不做，她也会自己找事做、种东西、玩脚趾。</li>
+        </ul>
+        <button class="btn primary wide" id="enter">进去</button>
+        <p class="dim small center">离开再回来，她会记得你走了多久。</p>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="./src/main.js?v=3"></script>
+  </body>
+</html>

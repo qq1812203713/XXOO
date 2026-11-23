@@ -1,0 +1,164 @@
+// 组装：把身体、神经、驱力、记忆、世界、渲染和 UI 接起来。
+// 这个文件里没有任何“行为逻辑”——它只负责让这些东西同时活着。
+import { createStore } from './core/store.js';
+import { createLog, clamp } from './core/util.js';
+import { buildRig } from './body/skeleton.js';
+import { createServos } from './body/servo.js';
+import { createMotors } from './body/motors/index.js';
+import { createDrives } from './brain/drives.js';
+import { createMemory } from './memory/memory.js';
+import { createWorld } from './world/world.js';
+import { createSpinal } from './brain/spinal.js';
+import { createCortex } from './brain/cortex.js';
+import { createBrain } from './brain/brain.js';
+import { createRenderer } from './render/renderer.js';
+import { createUI } from './ui/ui.js';
+
+// 任何未捕获的错误都直接写在屏幕上，而不是留一个黑屏让人猜
+function showFatal(message) {
+  let el = document.getElementById('fatal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'fatal';
+    el.className = 'fatal';
+    document.body.appendChild(el);
+  }
+  el.textContent = `出错了：${message}`;
+  el.hidden = false;
+}
+window.addEventListener('error', (e) => showFatal(e.message || '脚本加载失败'));
+window.addEventListener('unhandledrejection', (e) => showFatal(String(e.reason && e.reason.message ? e.reason.message : e.reason)));
+
+const STORAGE_KEY = 'xxoo.life.v1';
+const canvas = document.getElementById('stage');
+
+const store = createStore(STORAGE_KEY);
+const saved = store.load() || {};
+const log = createLog(60);
+
+// —— 身体 ——
+const rig = buildRig();
+const servos = createServos(rig);
+const motors = createMotors({ rig, servos, log });
+
+// —— 内在 ——
+const drives = createDrives(saved.drives);
+const memory = createMemory(saved.memory);
+const world = createWorld(saved.world);
+const spinal = createSpinal();
+const cortex = createCortex({ settings: saved.settings?.llm, log });
+const brain = createBrain({ rig, servos, motors, drives, memory, world, spinal, cortex, log });
+
+// —— 表现 ——
+const renderer = createRenderer(canvas);
+
+function saveState() {
+  store.save({
+    v: 1,
+    savedAt: Date.now(),
+    lastSeen: Date.now(),
+    rootX: brain.state.root.x,
+    drives: drives.snapshot(),
+    memory: memory.state,
+    world: world.state,
+    settings: {
+      llm: {
+        enabled: cortex.cfg.enabled,
+        baseUrl: cortex.cfg.baseUrl,
+        model: cortex.cfg.model,
+        key: cortex.cfg.key,
+      },
+    },
+  });
+}
+
+const ui = createUI({
+  rig,
+  brain,
+  drives,
+  world,
+  memory,
+  motors,
+  cortex,
+  renderer,
+  log,
+  onSave: saveState,
+  onReset: () => {
+    store.clear();
+    try {
+      localStorage.removeItem('xxoo.intro');
+    } catch {
+      /* ignore */
+    }
+    location.reload();
+  },
+});
+
+// —— 恢复 ——
+if (typeof saved.rootX === 'number' && Number.isFinite(saved.rootX)) {
+  brain.state.root.x = saved.rootX;
+  brain.state.root.targetX = saved.rootX;
+  renderer.cam.x = saved.rootX;
+  renderer.cam.targetX = saved.rootX;
+}
+if (saved.memory?.lastSeen) memory.state.lastSeen = saved.memory.lastSeen;
+
+function handleAway(ms) {
+  if (ms < 45 * 1000) return;
+  drives.applyOffline(ms);
+  memory.offlineEpisodes(ms, { plants: world.state.objects.length });
+  memory.counts.visits = (memory.counts.visits || 0) + 1;
+  brain.greetReturn(ms);
+  log.push({ layer: 'cortex', motor: 'life', text: `你离开了 ${Math.round(ms / 60000)} 分钟，她一直在。` });
+}
+
+if (saved.lastSeen) handleAway(Date.now() - saved.lastSeen);
+
+// —— 窗口 ——
+let visibleAt = Date.now();
+window.addEventListener('resize', () => renderer.resize());
+window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 180));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    visibleAt = Date.now();
+    saveState();
+  } else {
+    const away = Date.now() - visibleAt;
+    if (away > 90 * 1000) handleAway(away);
+    visibleAt = Date.now();
+    last = performance.now();
+    renderer.resize();
+  }
+});
+window.addEventListener('pagehide', saveState);
+window.addEventListener('beforeunload', saveState);
+
+// —— 主循环 ——
+let last = performance.now();
+let lastSave = performance.now();
+
+function loop(now) {
+  const raw = (now - last) / 1000;
+  last = now;
+  const dt = clamp(raw, 0, 0.06) * ui.speed;
+
+  try {
+    brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
+    renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
+    ui.frame(dt, Date.now());
+  } catch (err) {
+    console.error(err);
+    ui.toast(`出错了：${err && err.message ? err.message : err}`, 6000);
+  }
+
+  if (now - lastSave > 5000) {
+    lastSave = now;
+    saveState();
+  }
+  requestAnimationFrame(loop);
+}
+
+// 开场前先把身体摆好，避免第一帧从“零姿势”弹出来
+brain.tick(1 / 60, { pointer: null, petting: false });
+renderer.resize();
+requestAnimationFrame(loop);
