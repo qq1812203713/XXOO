@@ -52,6 +52,24 @@ input {
   cursor: crosshair;
 }
 
+/* Live2D 的她：独立一层 WebGL 画布，透明叠在世界之上。
+   pointer-events: none —— 所有触摸仍旧由 #stage 接，逻辑一行都不用改。 */
+#girl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+}
+
+#girl.on {
+  opacity: 1;
+}
+
 /* ————— 顶部 ————— */
 .hud {
   position: fixed;

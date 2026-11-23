@@ -34,6 +34,31 @@ npm run visual     # 用 @napi-rs/canvas 在 Node 里渲染并截图到 test/sho
 
 她的一切（包括 API Key）都只存在这台设备的 `localStorage` 里。
 
+## 她的样子：Live2D
+
+画面里那具身体现在是一个真正的二次元模型 —— **Haru**（Live2D 官方 Cubism 4 示例模型，2048 贴图），
+连同 Cubism Core 4.2.2、PIXI 6、`pixi-live2d-display` 一起放在 `vendor/` 里，**全部本地、不联网、不依赖 CDN**。
+
+它不是贴上来的一张会动的图。驱动关系仍然是「大脑 → 想要 → 身体自己实现」：
+
+| 大脑里的东西 | 模型上的结果 |
+| --- | --- |
+| 头骨角度 / 躯干倾角 | `ParamAngleX/Y/Z`、`ParamBodyAngleZ` |
+| 视线、注意力 | `ParamAngleX/Y`、`ParamEyeBallX/Y` |
+| 眨眼、困倦（脑干） | `ParamEyeLOpen/ROpen` |
+| 说话的嘴（音节起伏） | `ParamMouthOpenY` |
+| 情绪 | `ParamMouthForm`、眉毛、8 套表情之一 |
+| 被戳 | 播模型自带的 `Tap` 动作（不是我摆的姿势） |
+| 呼吸 | `ParamBreath` |
+
+没有 WebGL（或模型加载失败）时，页面会安静地退回原来那具 Canvas 2D 身体，不会白屏、不会报错。
+
+**诚实的两点**：
+
+- 每根手指/脚趾的 motor 仍然在跑（神经面板里能数出来），但 Haru 这个模型没有手指参数，所以画面上看不到手指各自动。
+  要看得见，得换成带手部骨骼的 VRM（3D）模型 —— 那是下一步的事。
+- Haru 是 Live2D 官方的示例模型，按 Live2D 的许可只能用于评估/个人学习；要商用得自己持有授权或换自制模型。
+
 ## 目录
 
 ```

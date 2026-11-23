@@ -13,6 +13,7 @@ import { createCortex } from './brain/cortex.js';
 import { createBrain } from './brain/brain.js';
 import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
+import { createAnimeBody } from './render/live2d.js';
 
 // 任何未捕获的错误都直接写在屏幕上，而不是留一个黑屏让人猜
 function showFatal(message) {
@@ -118,10 +119,40 @@ function handleAway(ms) {
 
 if (saved.lastSeen) handleAway(Date.now() - saved.lastSeen);
 
+// —— 二次元身体（Live2D）——
+// 不阻塞主循环：文件大、要 WebGL，允许它慢慢来。成功了就把 2D 身体换掉，
+// 失败了就安静地继续用 2D 身体，屏幕上不会多出任何东西。
+let anime = null;
+const girlCanvas = document.getElementById('girl');
+createAnimeBody({
+  canvas: girlCanvas,
+  modelUrl: './vendor/model/haru/haru_greeter_t03.model3.json',
+})
+  .then((body) => {
+    if (!body) return;
+    anime = body;
+    renderer.setBodyVisible(false);
+    girlCanvas?.classList.add('on');
+    const d = document.getElementById('intro-diag');
+    if (d && window.__booted) d.textContent = '已醒来 · Live2D 模型 · 点任意处进去';
+    log.push({ layer: 'render', motor: 'body', text: '换上了 Live2D 模型（Haru）。' });
+  })
+  .catch((err) => {
+    window.__report?.(`Live2D 没起来，继续用 2D 身体：${err && err.message ? err.message : err}`);
+  });
+
 // —— 窗口 ——
 let visibleAt = Date.now();
-window.addEventListener('resize', () => renderer.resize());
-window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 180));
+window.addEventListener('resize', () => {
+  renderer.resize();
+  anime?.resize();
+});
+window.addEventListener('orientationchange', () =>
+  setTimeout(() => {
+    renderer.resize();
+    anime?.resize();
+  }, 180),
+);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     visibleAt = Date.now();
@@ -148,6 +179,7 @@ function loop(now) {
 
   try {
     brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
+    if (anime) anime.sync(brain, motors.parts.face, dt);
     renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
     ui.frame(dt, Date.now());
   } catch (err) {

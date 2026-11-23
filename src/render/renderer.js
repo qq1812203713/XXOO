@@ -29,6 +29,7 @@ export function createRenderer(canvas) {
   const cam = { x: 0, scale: 3, ground: 0, targetX: 0 };
   let motes = [];
   let time = 0;
+  let bodyVisible = true;
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -764,7 +765,7 @@ export function createRenderer(canvas) {
     drawWorld(world, time);
     drawMotes(dt, time);
 
-    if (brain.state.pose) {
+    if (brain.state.pose && bodyVisible) {
       drawShadow(brain.state.pose);
       ctx.save();
       ctx.translate(W / 2 - cam.x * cam.scale, cam.ground - GROUND_Y * cam.scale);
@@ -918,6 +919,9 @@ export function createRenderer(canvas) {
 
   resize();
   return {
+    setBodyVisible(v) {
+      bodyVisible = !!v;
+    },
     resize,
     draw,
     drawInspector,
