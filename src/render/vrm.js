@@ -301,6 +301,38 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (rest[name]) restWorldQ.set(name, rest[name].q.clone());
   }
 
+  // —— 把长发从身前挪到身后 ——
+  // 模型原件的双马尾静止姿态是贴在身前的，把胳膊和裙子都挡住了。
+  // 这里一次性给发根骨加一个“向后”的世界旋转偏移：轴不用猜，
+  // 直接让“发根→下一节”的方向朝 +Z（她背后）偏一点。
+  try {
+    const HAIR_ROOTS = ['hair_01_01', 'hair_02_01', 'hair_03_01', 'ribbon_L', 'ribbon_R', 'hair1_L', 'hair1_R', 'mituami1'];
+    const X = new V(1, 0, 0);
+    const wqTmp = new Q();
+    for (const name of HAIR_ROOTS) {
+      const b = vrm.scene.getObjectByName(name);
+      if (!b) continue;
+      const kid = b.children?.[0];
+      if (!kid) continue;
+      const p0 = new V().setFromMatrixPosition(b.matrixWorld);
+      const p1 = new V().setFromMatrixPosition(kid.matrixWorld);
+      const dir = p1.clone().sub(p0).normalize();
+      let tilt = 0.22; // 弧度
+      // 选一个能让发梢朝 +Z（背后）转的方向
+      const test = dir.clone().applyAxisAngle(X, tilt);
+      if (test.z <= dir.z) tilt = -tilt;
+      const target = dir.clone().applyAxisAngle(X, tilt).normalize();
+      const w = new Q().setFromUnitVectors(dir, target);
+      const parentQ = b.parent ? b.parent.getWorldQuaternion(wqTmp) : new Q();
+      const inv = parentQ.clone().invert();
+      b.quaternion.copy(inv.multiply(w).multiply(parentQ).multiply(b.quaternion));
+    }
+    scene.updateMatrixWorld(true);
+    vrm.humanoid.update();
+  } catch {
+    /* 头发偏移失败不影响别的 */
+  }
+
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const size = box.getSize(new V());
   const height = size.y || 1.55;
@@ -429,14 +461,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const swaySlow = Math.sin(t * 0.13 + 1.1);
     const glance = Math.sin(t * 0.23) * 0.6 + Math.sin(t * 0.61 + 0.7) * 0.4;
 
-    turn('hips', { x: 0, y: gazeX * 0.1 + sway * 0.07, z: -(pelvis?.a || 0) * 0.5 + swaySlow * 0.035 });
-    turn('spine', { x: breath * 0.012, y: swaySlow * 0.05, z: -(spine1?.a || 0) * 0.8 });
-    turn('chest', { x: gazeY * 0.04 + breath * 0.035, y: 0, z: -(chest?.a || 0) * 0.9 });
+    const look = gazeX * 0.55 + glance * 0.28; // 她在“看哪儿”
+    turn('hips', { x: 0, y: look * 0.16 + sway * 0.07, z: -(pelvis?.a || 0) * 0.5 + swaySlow * 0.035 });
+    turn('spine', { x: breath * 0.012, y: look * 0.22 + swaySlow * 0.05, z: -(spine1?.a || 0) * 0.8 });
+    turn('chest', { x: gazeY * 0.04 + breath * 0.035, y: look * 0.24, z: -(chest?.a || 0) * 0.9 });
     turn('upperChest', { x: breath * 0.02, y: 0, z: -(chest?.a || 0) * 0.35 });
-    turn('neck', { x: -gazeY * 0.16 + breath * 0.01, y: gazeX * 0.3 + glance * 0.12, z: -(neck?.a || 0) * 0.8 });
+    turn('neck', { x: -gazeY * 0.16 + breath * 0.01, y: look * 0.3, z: -(neck?.a || 0) * 0.8 });
     turn('head', {
       x: -gazeY * 0.24 + breath * 0.02,
-      y: gazeX * 0.5 + glance * 0.22,
+      y: look * 0.55,
       z: -(head?.a || 0) * 1.0 + sway * 0.04,
     });
 
