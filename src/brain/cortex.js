@@ -128,25 +128,38 @@ export function createCortex({ settings, log } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 22000);
     try {
-      const url = `${String(cfg.baseUrl || '').replace(/\/+$/, '')}/chat/completions`;
-      const res = await fetch(url, {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cfg.key}`,
-        },
-        body: JSON.stringify({
-          model: cfg.model || 'gpt-4o-mini',
-          temperature: 0.95,
-          max_tokens: 220,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: statePrompt(payload) },
-          ],
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const base = String(cfg.baseUrl || '').replace(/\/+$/, '');
+      const messages = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: statePrompt(payload) },
+      ];
+      const model = cfg.model || 'gpt-4o-mini';
+      // 走同源代理：浏览器直连第三方 API 基本都会被 CORS 拦成 Failed to fetch
+      const viaProxy = !cfg.direct && globalThis.location?.protocol?.startsWith('http');
+      const res = viaProxy
+        ? await fetch('./llm', {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ baseUrl: base, key: cfg.key, model, messages }),
+          })
+        : await fetch(`${base}/chat/completions`, {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.key}` },
+            body: JSON.stringify({ model, temperature: 0.95, max_tokens: 220, messages }),
+          });
+      if (!res.ok) {
+        let detail = '';
+        try {
+          const j = await res.json();
+          const e = j?.error;
+          detail = typeof e === 'string' ? e : String(e?.message || j?.message || '');
+        } catch {
+          /* 上游没回 JSON */
+        }
+        throw new Error(`HTTP ${res.status}${detail ? `：${detail}` : ''}`);
+      }
       const data = await res.json();
       const content = data?.choices?.[0]?.message?.content || '';
       const parsed = parseJson(content);

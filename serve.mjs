@@ -62,6 +62,66 @@ const server = http.createServer((req, res) => {
     return done(403);
   }
 
+  // —— 大模型代理 ——
+  // 浏览器直连第三方 API 十有八九被 CORS 拦（Failed to fetch）。
+  // 这里让页面打到同源的 /llm，由服务器转发出去：没有跨域，没有预检。
+  if (rel === '/llm') {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Cache-Control': 'no-store',
+      });
+      res.end();
+      return done(204);
+    }
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', async () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: '请求体不是 JSON' }));
+        return done(400);
+      }
+      const base = String(payload.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+      const key = String(payload.key || '');
+      if (!key) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: '没有 API Key' }));
+        return done(400);
+      }
+      try {
+        const upstream = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+          body: JSON.stringify({
+            model: payload.model || 'gpt-4o-mini',
+            temperature: payload.temperature ?? 0.95,
+            max_tokens: payload.max_tokens ?? 220,
+            messages: payload.messages || [],
+          }),
+        });
+        const text = await upstream.text();
+        res.writeHead(upstream.status, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(text);
+        done(upstream.status, ` ← 代理到 ${base}`);
+      } catch (err) {
+        res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ error: `服务器也没连上：${err && err.message ? err.message : err}` }));
+        done(502, ` ← 代理失败 ${base}`);
+      }
+    });
+    return;
+  }
+
   // 当前构建号：页面拿它比较自己是不是旧版
   if (rel === '/version') {
     const out = JSON.stringify({ build: BUILD });

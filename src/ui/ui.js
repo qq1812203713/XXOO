@@ -187,7 +187,8 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
       const err = cortex.lastError || '没有任何返回';
       status.textContent =
         `失败：${err}。\n` +
-        '浏览器直连最常被 CORS 拦（Failed to fetch 就是它）。换一个允许跨域的兼容接口，或在本机起个代理再填这里。';
+        '请求已经绕开浏览器直连（走本地 /llm 代理），所以不再是跨域问题：' +
+        '多半是 Key 不对、地址写错（要写到 /v1 为止）、或模型名不存在。';
     }
   });
 

@@ -182,7 +182,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   };
 
   const measureFacing = () => {
-    vrm.scene.updateMatrixWorld(true);
+    scene.updateMatrixWorld(true);
     const eye = eyeForward();
     if (eye) return eye;
     const f = new V();
@@ -229,13 +229,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (before) {
       // 一次到位：把她现在的朝向直接拧到 +Z
       holder.rotation.y = (-deg(before) * Math.PI) / 180 + (extra * Math.PI) / 180;
-      vrm.scene.updateMatrixWorld(true);
+      scene.updateMatrixWorld(true);
       const after = measureFacing();
       faceProbe = `${deg(before).toFixed(0)}°→${after ? deg(after).toFixed(0) : '?'}°`;
       if (after && after.z < 0) {
         // 还是不朝镜头：再拧半圈（说明前面算出来的方向是反的）
         holder.rotation.y += Math.PI;
-        vrm.scene.updateMatrixWorld(true);
+        scene.updateMatrixWorld(true);
         const last = measureFacing();
         faceProbe += ` →${last ? deg(last).toFixed(0) : '?'}°(补半圈)`;
       }
@@ -244,7 +244,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       faceProbe = '没量到，硬转180';
     }
     faceYaw = (holder.rotation.y * 180) / Math.PI;
-    vrm.scene.updateMatrixWorld(true);
+    scene.updateMatrixWorld(true);
     vrm.humanoid.update();
     onStatus?.(`已醒来 · 3D 身体（VRM）· 朝向 ${faceProbe}`);
   }
@@ -521,7 +521,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   function debugLines() {
     const out = [];
     out.push(`朝向：量到 ${faceProbe}（应为 180 或 0）`);
-    vrm.scene.updateMatrixWorld(true);
+    scene.updateMatrixWorld(true);
     for (const name of DEBUG_BONES) {
       const b = node(name);
       const t = lastTarget.get(name);
@@ -583,7 +583,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     // 手动转身：每按一次 +deg（默认 180），并记住到下次打开
     turnBody(deg = 180) {
       holder.rotation.y += (deg * Math.PI) / 180;
-      vrm.scene.updateMatrixWorld(true);
+      scene.updateMatrixWorld(true);
       vrm.humanoid.update();
       const f = measureFacing();
       try {
