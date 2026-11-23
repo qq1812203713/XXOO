@@ -136,7 +136,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 不再调用 VRMUtils.rotateVRM0：它会按版本号偷偷转半圈，转没转无从得知。
   // 朝向统一由下面的实测决定，只有一个入口。
   // 模型挂在一个外壳上：转动外壳，永远不怕别处改写 vrm.scene.rotation
-  const FACE_KEY = 'xxoo.faceOffset';
+  // 注意：旧版本在这里存过“累计偏移”，那是在校正本身还错的时候按出来的，
+  // 现在校正已经对了，再叠加就等于把对的结果又转回去。
+  // 换个新 key，老的脏数据自然失效。
+  const FACE_KEY = 'xxoo.faceYaw.v2';
   const holder = new THREE.Group();
   holder.add(vrm.scene);
   scene.add(holder);
@@ -215,8 +218,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (qs.has('face') && Number.isFinite(forced)) {
       extra = forced;
     } else {
-      const saved = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
-      if (Number.isFinite(saved)) extra = saved;
+      let saved = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
+      if (Number.isFinite(saved)) {
+        saved = ((saved % 360) + 360) % 360; // 归一到 0..359
+        if (saved > 180) saved -= 360; // 归一到 -179..180
+        extra = saved;
+      }
     }
 
     if (before) {
@@ -581,7 +588,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const f = measureFacing();
       try {
         const prev = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
-        globalThis.localStorage?.setItem(FACE_KEY, String((Number.isFinite(prev) ? prev : 0) + deg));
+        const next = ((((Number.isFinite(prev) ? prev : 0) + deg) % 360) + 360) % 360;
+        globalThis.localStorage?.setItem(FACE_KEY, String(next));
       } catch {
         /* 隐私模式 */
       }
