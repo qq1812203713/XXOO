@@ -110,7 +110,13 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     $('llm-base').value = cortex.cfg.baseUrl || '';
     $('llm-model').value = cortex.cfg.model || '';
     $('llm-key').value = cortex.cfg.key || '';
-    $('llm-hint').textContent = cortex.lastError ? `上次错误：${cortex.lastError}` : '留空则只用本地心智。Key 不会离开这台设备。';
+    $('llm-hint').textContent = cortex.lastError
+      ? `上次错误：${cortex.lastError}`
+      : '留空则只用本地心智。Key 不会离开这台设备。';
+    const st = $('llm-status');
+    if (st) {
+      st.textContent = cortex.cfg.enabled && cortex.cfg.key ? '当前：已启用（会调用远端模型）' : '当前：未启用，只用本地心智';
+    }
   }
 
   $('open-nerves').addEventListener('click', () => openNerves(refs.nerves.hidden));
@@ -153,6 +159,36 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     onSave?.();
     toast(cortex.shouldUseLLM() ? '她可以借用更远的心智了' : '已切回本地心智');
     openSettings(false);
+  });
+
+  // 测试连接：把“到底通不通”变成一个按钮，而不是让你猜
+  $('llm-test')?.addEventListener('click', async () => {
+    const status = $('llm-status');
+    const btn = $('llm-test');
+    const patch = {
+      enabled: true,
+      baseUrl: $('llm-base').value.trim() || 'https://api.openai.com/v1',
+      model: $('llm-model').value.trim() || 'gpt-4o-mini',
+      key: $('llm-key').value.trim(),
+    };
+    if (!patch.key) {
+      status.textContent = '先填 API Key。';
+      return;
+    }
+    cortex.configure(patch);
+    btn.disabled = true;
+    status.textContent = '正在连接…';
+    const res = await cortex.askLLM({ userText: '这是一次连接测试，请正常回一句。' });
+    btn.disabled = false;
+    if (res) {
+      status.textContent = `连通了。她回：「${res.say}」`;
+    } else heroFallback();
+    function heroFallback() {
+      const err = cortex.lastError || '没有任何返回';
+      status.textContent =
+        `失败：${err}。\n` +
+        '浏览器直连最常被 CORS 拦（Failed to fetch 就是它）。换一个允许跨域的兼容接口，或在本机起个代理再填这里。';
+    }
   });
 
   $('reset').addEventListener('click', () => {

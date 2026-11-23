@@ -141,12 +141,33 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   scene.add(vrm.scene);
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
-
-  // ————————————————— 静止姿态采集 —————————————————
-  vrm.scene.updateMatrixWorld(true);
-  const rest = Object.create(null); // name -> { q, dir, pos }
   const V = THREE.Vector3;
   const Q = THREE.Quaternion;
+
+  // —— 朝向自校准 ——
+  // 不同 VRM 有的朝 +Z 有的朝 -Z，靠版本号猜总会错一次。这里直接量：
+  // 左右肩连线（她的左）= leftAxis，up = +Y，前 = left × up。
+  // 然后把整个场景转一下，保证她**一定**面对镜头。
+  vrm.scene.updateMatrixWorld(true);
+  {
+    const L = new V();
+    const R = new V();
+    node('leftUpperArm')?.getWorldPosition(L);
+    node('rightUpperArm')?.getWorldPosition(R);
+    const leftAxis = L.clone().sub(R).setY(0);
+    if (leftAxis.lengthSq() > 1e-6) {
+      leftAxis.normalize();
+      const facing = new V().crossVectors(leftAxis, new V(0, 1, 0)).normalize();
+      const yaw = Math.atan2(facing.x, facing.z);
+      if (Math.abs(yaw) > 0.01) {
+        vrm.scene.rotation.y -= yaw;
+        vrm.scene.updateMatrixWorld(true);
+      }
+    }
+  }
+
+  // ————————————————— 静止姿态采集 —————————————————
+  const rest = Object.create(null); // name -> { q, dir, pos }
 
   for (const name of ALL_BONE_NAMES) {
     const b = node(name);
@@ -400,9 +421,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       }
     }
 
-    // 呼吸：胸腔起伏
-    const chestNode = node('chest');
-    if (chestNode) chestNode.position.y = (0.5 + 0.5 * Math.sin(t * 1.35) - 0.5) * 0.012;
 
     // 她在世界里走动时，整个人跟着平移一点
     vrm.scene.position.x = clamp((brain.state.root.x || 0) * 0.006, -0.35, 0.35);
@@ -454,7 +472,20 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   vrm.update(0);
   poseFromRig({ state: { pose: null } }, null, 0);
+  try {
+    vrm.springBoneManager?.reset?.();
+  } catch {
+    /* 没有就算了 */
+  }
   renderer.render(scene, camera);
+  // 弹簧骨在首帧容易因为“骨架刚被换过”而弹飞，半秒后再复位一次
+  setTimeout(() => {
+    try {
+      vrm.springBoneManager?.reset?.();
+    } catch {
+      /* ignore */
+    }
+  }, 600);
 
   return {
     vrm,

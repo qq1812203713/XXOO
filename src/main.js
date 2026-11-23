@@ -264,7 +264,7 @@ requestAnimationFrame(loop);
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
 (function stampVersion() {
   const el = document.getElementById('ver');
-  if (el) el.textContent = `v${BUILD.slice(-4)}`;
+  if (el) el.textContent = `#${String(BUILD).slice(-4)}`;
   const check = async () => {
     try {
       const r = await fetch(`./version?t=${Date.now()}`, { cache: 'no-store' });
