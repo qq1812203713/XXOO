@@ -314,10 +314,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     // 竖屏手机里她应该占满画面（原来她只占 2/3，上下全是黑）
-    const visH = height * 0.98;
+    // 脚也要在画面里（上一版把她的小腿切掉了）
+    const visH = height * 1.06;
     const dist = visH / (2 * Math.tan(camera.fov / 2 / DEG));
-    camera.position.set(0, height * 0.66, FRONT * dist);
-    camera.lookAt(0, height * 0.6, 0);
+    camera.position.set(0, height * 0.6, FRONT * dist);
+    camera.lookAt(0, height * 0.53, 0);
     camera.updateProjectionMatrix();
   }
   layout();
@@ -449,7 +450,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const hand = j(`hand_${side}`);
       if (!up) continue;
 
-      const aUp = up.a ?? Math.PI;
+      // 手臂也要有一点自己的呼吸：几度的慢摆，避免“两根棍子”
+      const armSway = Math.sin(t * 0.37 + (side === 'L' ? 0 : 1.7)) * 0.05 + Math.sin(t * 0.19 + (side === 'L' ? 2 : 0.4)) * 0.03;
+      const aUp = (up.a ?? Math.PI) + armSway;
       // 我们的 a：0 朝上、π 朝下、顺时针为正；换成 3D 就是“在额状面里张开多少”
       // 再补一点向前的分量，避免像稻草人一样贴着身体
       const dirUp = new V(Math.sin(aUp), Math.cos(aUp), 0);
