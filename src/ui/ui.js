@@ -14,6 +14,22 @@ const MOOD_LABEL = {
   startled: '被吓到',
 };
 
+const CLIP_LABEL = {
+  idle: '站着',
+  walk: '走路',
+  turnL: '向左转身',
+  turnR: '向右转身',
+  lookL: '往左看',
+  lookR: '往右看',
+  reachL: '伸手',
+  reachR: '伸手',
+  grip: '握了握手',
+  stretch: '伸懒腰',
+  freeze: '定格',
+};
+
+const FINGER_CN = { Thumb: '拇指', Index: '食指', Middle: '中指', Ring: '无名指', Little: '小指' };
+
 const LAYER_LABEL = {
   brain: '意图',
   cerebellum: '小脑',
@@ -23,7 +39,7 @@ const LAYER_LABEL = {
   cortex: '皮层',
 };
 
-export function createUI({ rig, brain, drives, world, memory, motors, cortex, renderer, log, onSave, onReset }) {
+export function createUI({ rig, brain, drives, world, memory, motors, cortex, renderer, log, getBody, onSave, onReset }) {
   const refs = {
     bubble: $('bubble'),
     bubbleText: $('bubble-text'),
@@ -88,7 +104,7 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   ui.toast = toast;
 
   // ————— 面板开关 —————
-  let nerveTab = { side: 'L', part: 'hand' };
+  let nerveTab = { side: 'L', part: 'body' };
   let heroTabBound = false;
 
   function openNerves(open) {
@@ -136,9 +152,11 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
       b.classList.toggle('on', on);
     }
     $('inspector-hint').textContent =
-      nerveTab.part === 'hand'
-        ? `第 ${nerveTab.side === 'L' ? '左' : '右'} 手 · 每节指骨一个马达，青色 = 正在执行`
-        : `第 ${nerveTab.side === 'L' ? '左' : '右'} 脚 · 每个脚趾独立相位，青色 = 正在执行`;
+      nerveTab.part === 'body'
+        ? '全身 · 线是真的骨头，青色越亮 = 这一下动得越快'
+        : nerveTab.part === 'hand'
+          ? `第 ${nerveTab.side === 'L' ? '左' : '右'} 手 · 15 节指骨，数字是现在的弯曲角度`
+          : `第 ${nerveTab.side === 'L' ? '左' : '右'} 脚 · 脚踝与脚趾的真实朝向`;
   }
   for (const b of document.querySelectorAll('#nerve-tabs button')) {
     b.addEventListener('click', () => {
@@ -386,6 +404,101 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     positionBubble();
   }
 
+  // ————— 神经面板：画的是她身上真实的骨头 —————
+  // 数据全部来自 VRM：世界坐标、真实转角。没有 3D 身体时才退回示意图。
+  function drawNerve(g2, f, w, h) {
+    g2.clearRect(0, 0, w, h);
+
+    const isHand = nerveTab.part === 'hand';
+    const isFoot = nerveTab.part === 'foot';
+    const side = nerveTab.side === 'L' ? 'left' : 'right';
+    const keep = new Set();
+    if (!isHand && !isFoot) {
+      for (const b of f.bones) keep.add(b.n);
+    } else if (isHand) {
+      keep.add(`${side}Hand`);
+      keep.add(`${side}LowerArm`);
+      for (const n of f.bones) if (n.n.startsWith(side) && /Proximal|Intermediate|Distal|Metacarpal/.test(n.n)) keep.add(n.n);
+    } else {
+      keep.add(`${side}Foot`);
+      keep.add(`${side}LowerLeg`);
+      keep.add(`${side}Toes`);
+    }
+
+    const byName = new Map();
+    for (const b of f.bones) if (keep.has(b.n)) byName.set(b.n, b);
+    if (!byName.size) return;
+
+    // 正面投影：她在 -Z 面向镜头，所以屏幕 x 就是 -x
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const b of byName.values()) {
+      const px = -b.x;
+      const py = -b.y;
+      minX = Math.min(minX, px);
+      maxX = Math.max(maxX, px);
+      minY = Math.min(minY, py);
+      maxY = Math.max(maxY, py);
+    }
+    const pad = 16;
+    const s = Math.min((w - pad * 2) / Math.max(1e-3, maxX - minX), (h - pad * 2) / Math.max(1e-3, maxY - minY));
+    const ox = w / 2 - ((minX + maxX) / 2) * s;
+    const oy = h / 2 - ((minY + maxY) / 2) * s;
+    const X = (b) => -b.x * s + ox;
+    const Y = (b) => -b.y * s + oy;
+
+    g2.save();
+    g2.lineCap = 'round';
+
+    // 骨：热度越高越亮
+    const link = (a, b) => {
+      if (!a || !b) return;
+      const heat = Math.max(a.a, b.a);
+      g2.strokeStyle = heat > 0.08 ? `rgba(120,240,255,${0.12 + heat * 0.55})` : 'rgba(255,196,224,0.16)';
+      g2.lineWidth = 2 + heat * 3;
+      g2.beginPath();
+      g2.moveTo(X(a), Y(a));
+      g2.lineTo(X(b), Y(b));
+      g2.stroke();
+    };
+    for (const chain of f.chains) {
+      for (let i = 1; i < chain.length; i++) link(byName.get(chain[i - 1]), byName.get(chain[i]));
+    }
+
+    // 关节
+    for (const b of byName.values()) {
+      const r = 2.2 + b.a * 2.4;
+      g2.beginPath();
+      g2.arc(X(b), Y(b), r, 0, Math.PI * 2);
+      g2.fillStyle = b.a > 0.06 ? `rgba(140,245,255,${0.45 + b.a * 0.55})` : 'rgba(255,206,230,0.55)';
+      g2.fill();
+    }
+
+    // 手：把每根手指现在的弯曲角度标出来（真数字）
+    if (isHand && f.fingers) {
+      g2.font = '10px ui-sans-serif, system-ui, sans-serif';
+      g2.textBaseline = 'middle';
+      let row = 0;
+      for (const fg of f.fingers.filter((x) => x.side === nerveTab.side)) {
+        const tip = byName.get(fg.segs[fg.segs.length - 1].n);
+        if (!tip) continue;
+        g2.fillStyle = fg.maxBend > 40 ? 'rgba(140,245,255,0.95)' : 'rgba(255,206,230,0.7)';
+        g2.fillText(`${FINGER_CN[fg.finger] || fg.finger} ${fg.maxBend.toFixed(0)}°`, X(tip) + 8, Y(tip) + row * 0);
+        row += 1;
+      }
+    }
+    g2.restore();
+
+    // 右下角：她现在在做什么
+    g2.font = '11px ui-sans-serif, system-ui, sans-serif';
+    g2.fillStyle = 'rgba(255,214,232,0.8)';
+    g2.textAlign = 'right';
+    g2.fillText(`${CLIP_LABEL[f.clip] || f.clip} · ${f.bones.length} 根骨`, w - 8, h - 8);
+    g2.textAlign = 'left';
+  }
+
   function updateInspector() {
     if (refs.nerves.hidden) return;
     const c = refs.inspector;
@@ -398,6 +511,14 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
     }
     const g2 = c.getContext('2d');
     g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const body = getBody?.();
+    const frame = body?.nerveFrame?.();
+    if (frame) {
+      drawNerve(g2, frame, rect.width, rect.height);
+      return;
+    }
+    // 没有 3D 身体（Live2D / 2D）时退回骨骼示意图
     renderer.drawInspector(g2, {
       rig,
       pose: brain.state.pose,

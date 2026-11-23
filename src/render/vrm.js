@@ -1198,6 +1198,75 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     applyStage();
   }
 
+  // ————————————————— 神经面板要的“真实数据” —————————————————
+  // 这里不画示意图：每一帧从 VRM 的归一化骨骼上读真实世界坐标和真实转角，
+  // 所以面板里动的那根线，就是她身上动的那根骨。
+  const nerveHeat = new Map();
+  const nervePrev = new Map();
+  const tmpQ2 = new Q();
+  const tmpV2 = new V();
+  const FINGER_NAMES = ['ThumbMetacarpal', 'ThumbProximal', 'ThumbIntermediate', 'ThumbDistal', 'IndexProximal', 'IndexIntermediate', 'IndexDistal', 'MiddleProximal', 'MiddleIntermediate', 'MiddleDistal', 'RingProximal', 'RingIntermediate', 'RingDistal', 'LittleProximal', 'LittleIntermediate', 'LittleDistal'];
+
+  function nerveFrame() {
+    if (!vrm) return null;
+    vrm.scene.updateMatrixWorld();
+    const bones = [];
+    const seen = new Set();
+    const add = (name) => {
+      const b = node(name);
+      if (!b || seen.has(name)) return;
+      seen.add(name);
+      b.getWorldQuaternion(tmpQ2);
+      const prev = nervePrev.get(name);
+      let d = 0;
+      if (prev) d = 2 * Math.acos(Math.min(1, Math.abs(prev.dot(tmpQ2))));
+      nervePrev.set(name, tmpQ2.clone());
+      const heat = Math.max(clamp(d * 26, 0, 1), (nerveHeat.get(name) || 0) * 0.93);
+      nerveHeat.set(name, heat);
+      b.getWorldPosition(tmpV2);
+      bones.push({ n: name, x: tmpV2.x, y: tmpV2.y, z: tmpV2.z, a: heat });
+    };
+    for (const chain of CHAINS) for (const name of chain) add(name);
+    for (const side of ['left', 'right']) for (const f of FINGER_NAMES) add(`${side}${f}`);
+
+    // 手指/脚趾的弯曲量：现在朝向和静止朝向差了多少度
+    const fingers = [];
+    for (const side of ['left', 'right']) {
+      for (const f of ['Thumb', 'Index', 'Middle', 'Ring', 'Little']) {
+        const segs = [];
+        for (const seg of FINGER_NAMES.filter((n) => n.startsWith(f))) {
+          const name = `${side}${seg}`;
+          const b = node(name);
+          const r = rest[name];
+          if (!b || !r) continue;
+          b.getWorldQuaternion(tmpQ2);
+          const bend = 2 * Math.acos(Math.min(1, Math.abs(tmpQ2.dot(r.q))));
+          segs.push({ n: name, bend: (bend * 180) / Math.PI });
+        }
+        if (!segs.length) continue;
+        fingers.push({
+          side: side === 'left' ? 'L' : 'R',
+          finger: f,
+          maxBend: Math.max(...segs.map((s) => s.bend)),
+          segs,
+        });
+      }
+    }
+
+    return {
+      clip: current,
+      nav: nav.mode,
+      yaw: nav.yaw,
+      walked: nav.walked,
+      t,
+      bones,
+      chains: CHAINS,
+      fingers,
+      height,
+      mode: 'vrm',
+    };
+  }
+
   const LEGACY = new URLSearchParams(globalThis.location?.search || '').get('anim') === 'legacy';
 
   function sync(brain, face, dt) {
@@ -1245,6 +1314,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     rest,
     debugLines,
     sync,
+    nerveFrame,
+    // 她现在在演哪一段 —— 让“神经系统”里写的字和画面对得上
+    action: () => ({ clip: current, count: actsPlayed, nav: nav.mode, walked: nav.walked }),
     // 手动转身：每按一次 +deg（默认 180），并记住到下次打开
     turnBody(deg = 180) {
       holder.rotation.y += (deg * Math.PI) / 180;

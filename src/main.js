@@ -98,6 +98,7 @@ function saveState() {
 }
 
 const ui = createUI({
+  getBody: () => body3d,
   rig,
   brain,
   drives,
@@ -295,9 +296,36 @@ function startSnapshots() {
 
 // 一帧的全部工作。抽出来是为了给“看门狗”复用。
 let lastFrameAt = performance.now();
+const CLIP_CN = {
+  walk: '走一段路',
+  turnL: '向左转身',
+  turnR: '向右转身',
+  lookL: '往左看',
+  lookR: '往右看',
+  reachL: '伸手去够',
+  reachR: '伸手去够',
+  grip: '握了握手',
+  stretch: '伸了个懒腰',
+  idle: '停下来站着',
+};
+let lastActCount = 0;
+let lastNav = 'idle';
+
 function step(dt) {
   brain.tick(dt, { pointer: ui.pointer, petting: ui.petting });
-  if (body3d) body3d.sync(brain, motors.parts.face, dt);
+  if (body3d) {
+    body3d.sync(brain, motors.parts.face, dt);
+    // 她身上真的发生的事，写进神经面板 —— 不是编的，是动作系统的回调
+    const act = body3d.action?.();
+    if (act && act.count !== lastActCount) {
+      lastActCount = act.count;
+      if (act.clip && act.clip !== 'idle') log.push({ layer: 'motor', motor: 'body', text: `身体：${CLIP_CN[act.clip] || act.clip}` });
+    }
+    if (act && act.nav !== lastNav && act.nav === 'walk') {
+      log.push({ layer: 'cerebellum', motor: 'body', text: `小脑：开始走 · 已走 ${act.walked.toFixed(1)} m` });
+    }
+    if (act) lastNav = act.nav;
+  }
   else if (anime) anime.sync(brain, motors.parts.face, dt);
   renderer.draw({ rig, brain, face: motors.parts.face, world, drives, cortex, memory }, dt);
   ui.frame(dt, Date.now());
