@@ -212,58 +212,39 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return tex;
   }
 
-  // 地面用一张会滚动的网格贴图表示“她在往前走”；景物排成格子，
-  // 走到哪儿就从另一边绕回来 —— 这样永远不会有东西突然穿过她的身体。
+  // 场景全撤了：没有地面网格、没有树、没有石头、没有草。
+  // 她是这画面里唯一的实体，脚下一圈很淡的光只负责让她“站在地上”。
   const world = { tex: null, props: [], tile: 4.5, span: 27 };
   {
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.95, metalness: 0 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = 0;
-    stage.add(ground);
-    world.tex = ground.material.map;
     stage.position.y = floorY;
-    scene.fog = new THREE.Fog(0x0b0d14, 5.5, 19);
-
-    let seed = 20261122;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    const crystalMat = new THREE.MeshStandardMaterial({ color: 0x8fd2ff, emissive: 0x2a6fa8, emissiveIntensity: 0.5, roughness: 0.3 });
-    const treeMat = new THREE.MeshStandardMaterial({ color: 0x2b4a63, roughness: 0.9 });
-    const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe3b0, emissive: 0xffb35c, emissiveIntensity: 1.4 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a2333, roughness: 1 });
-
-    const n = 6;
-    for (let ix = 0; ix < n; ix++) {
-      for (let iz = 0; iz < n; iz++) {
-        const bx = (ix - (n - 1) / 2) * world.tile + (rnd() - 0.5) * 1.6;
-        const bz = (iz - (n - 1) / 2) * world.tile + (rnd() - 0.5) * 1.6;
-        const kind = rnd();
-        let m;
-        if (kind < 0.55) {
-          const h = 0.35 + rnd() * 1.2;
-          m = new THREE.Mesh(new THREE.ConeGeometry(0.15 + rnd() * 0.2, h, 6), treeMat);
-          m.position.y = h / 2;
-          const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.28, 5), trunkMat);
-          tr.position.y = 0.14;
-          m.add(tr);
-        } else if (kind < 0.85) {
-          const s0 = 0.1 + rnd() * 0.26;
-          m = new THREE.Mesh(new THREE.OctahedronGeometry(s0, 0), crystalMat);
-          m.position.y = s0 * 0.9;
-          m.rotation.y = rnd() * 3;
-        } else {
-          m = new THREE.Mesh(new THREE.SphereGeometry(0.05 + rnd() * 0.05, 8, 8), lampMat);
-          m.position.y = 0.5 + rnd() * 0.9;
-        }
-        m.position.x = bx;
-        m.position.z = bz;
-        m.userData.base = new THREE.Vector2(bx, bz);
-        stage.add(m);
-        world.props.push(m);
-      }
-    }
+    const glowTex = (() => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const g = c.getContext('2d');
+      const rg = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+      rg.addColorStop(0, 'rgba(255,214,236,0.85)');
+      rg.addColorStop(0.45, 'rgba(240,150,200,0.26)');
+      rg.addColorStop(1, 'rgba(255,150,200,0)');
+      g.fillStyle = rg;
+      g.fillRect(0, 0, 128, 128);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    })();
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.5, 1.5),
+      new THREE.MeshBasicMaterial({
+        map: glowTex,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        opacity: 0.6,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.004;
+    glow.renderOrder = -1;
+    stage.add(glow);
   }
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);

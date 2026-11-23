@@ -869,7 +869,7 @@ export function createRenderer(canvas) {
 
     drawBackground(night, drives.v.arousal);
     drawGround();
-    drawWorld(world, time);
+    // 景物整块撤掉了（树、石头、草）——她要一个人待在画面里。
     drawMotes(dt, time);
 
     if (brain.state.pose && bodyVisible) {
