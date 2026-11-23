@@ -51,6 +51,29 @@ npm run visual     # 用 @napi-rs/canvas 在 Node 里渲染并截图到 test/sho
 | 被戳 | 播模型自带的 `Tap` 动作（不是我摆的姿势） |
 | 呼吸 | `ParamBreath` |
 
+### 骨骼 → 模型的每一条线
+
+`src/render/bind.js` 是那条“接起来”的线。骨架里每个关节解算出来的角度/位移，被翻译成模型参数：
+
+| 骨骼（关节 id） | 模型参数 | 说明 |
+| --- | --- | --- |
+| `head.a` + `neck.a` | `ParamAngleZ` | 歪头 |
+| `head.x - chest.x` + 视线 | `ParamAngleX` | 转头看你 |
+| `gazeY` / 头部位移 | `ParamAngleY` | 抬/低头 |
+| `chest` `spine1` `spine2` 累加 | `ParamBodyAngleZ` `ParamBodyUpper` | 腰背的倾 |
+| `pelvis.x` / 呼吸 | `ParamBodyAngleX` `ParamBreath` | 重心与呼吸 |
+| `arm_L_upper.a`（相对静息 π） | `ParamArmLA` | 抬肩 |
+| `arm_L_fore.a - arm_L_upper.a` | `ParamArmLB`（0 直 … 5 全弯） | 屈肘 |
+| `hand_L.a - arm_L_fore.a` | `ParamHandAngleL` | 手腕 |
+| `face.blink` `face.eyeOpen` | `ParamEyeLOpen/ROpen` | 眨眼 |
+| `face.gazeX/Y` | `ParamEyeBallX/Y` | 眼球 |
+| `brain.state.talking` | `ParamMouthOpenY` | 说话 |
+| 情绪 | `ParamMouthForm` `ParamEye*Smile` `ParamBrow*` `ParamTear` | 表情 |
+| 头的角速度 | `ParamScarf` `ParamHair*` | 围巾与头发（物理再叠一层） |
+
+共驱动 **31 个参数**。这些不是拍脑袋写的数字：`test/bind.test.mjs` 会用 Live2D 官方 Core
+解析真实 moc3，拿到这 42 个参数的合法区间，跑 1800 帧，逐条断言“参数名存在、值不越界、而且真的在变”。
+
 没有 WebGL（或模型加载失败）时，页面会安静地退回原来那具 Canvas 2D 身体，不会白屏、不会报错。
 
 **诚实的两点**：

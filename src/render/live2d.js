@@ -7,6 +7,8 @@
 // 全部文件都在本地 vendor/ 里，不联网、不依赖 CDN。加载失败就返回 null，
 // 主程序会安静地退回到原来那具 2D 身体，不会白屏。
 
+import { createBinder } from './bind.js';
+
 const VENDOR = './vendor/';
 
 function hasWebGL() {
@@ -41,9 +43,6 @@ function loadScript(src, timeout = 15000) {
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
-
-// 情绪 → 嘴型曲率（ParamMouthForm）
-const MOUTH_FORM = { calm: 0.15, happy: 0.85, shy: 0.25, curious: 0.3, sleepy: -0.15, sad: -0.6, startled: -0.2 };
 
 export async function createAnimeBody({ canvas, modelUrl, onStatus }) {
   if (!canvas) throw new Error('没有给画布');
@@ -90,30 +89,39 @@ export async function createAnimeBody({ canvas, modelUrl, onStatus }) {
     if (hasParam(id)) core.setParameterValueById(id, v);
   };
 
-  // 大脑 → 模型参数：只有“想要”，没有关节角
-  const now = { angleX: 0, angleY: 0, angleZ: 0, eye: 1, mouth: 0, form: 0, breath: 0 };
+  // 骨骼 → 参数：bind.js 负责翻译，这里只负责写进模型
+  const binder = createBinder();
+  let params = Object.create(null);
+  // 这几个参数模型自带的 idle 动作也在动。全盖会让她的手臂变成棍子，
+  // 所以按比例混：七成听骨骼的，三成留给模型自己的小动作。
+  const BLEND = new Set([
+    'ParamArmLA', 'ParamArmRA', 'ParamArmLB', 'ParamArmRB',
+    'ParamHandAngleL', 'ParamHandAngleR', 'ParamBodyUpper',
+    'ParamScarf', 'ParamHairFront', 'ParamHairSide',
+  ]);
+  const read = (id) => {
+    try {
+      return core.getParameterValueById(id);
+    } catch {
+      return 0;
+    }
+  };
+  const applyParams = () => {
+    for (const k in params) {
+      if (!hasParam(k)) continue;
+      const v = BLEND.has(k) ? read(k) * 0.3 + params[k] * 0.7 : params[k];
+      core.setParameterValueById(k, v);
+    }
+  };
   let t = 0;
   let lastTouch = 0;
   let lastMood = null;
   let alpha = 0;
-  let talkLevel = 0;
+  let bindTick = 0;
+  let bindEl = null;
 
-  model.internalModel.on('afterMotionUpdate', () => {
-    set('ParamAngleX', now.angleX);
-    set('ParamAngleY', now.angleY);
-    set('ParamAngleZ', now.angleZ);
-    set('ParamEyeLOpen', clamp(now.eye, 0, 1));
-    set('ParamEyeROpen', clamp(now.eye, 0, 1));
-    set('ParamEyeBallX', clamp(now.angleX / 30, -1, 1));
-    set('ParamEyeBallY', clamp(-now.angleY / 30, -1, 1));
-    set('ParamMouthOpenY', clamp(now.mouth, 0, 1));
-    set('ParamMouthForm', clamp(now.form, -1, 1));
-    set('ParamBrowLY', clamp(now.form * 0.6, -1, 1));
-    set('ParamBrowRY', clamp(now.form * 0.6, -1, 1));
-    set('ParamBreath', now.breath);
-    set('ParamBodyAngleX', clamp(now.angleX * 0.25, -10, 10));
-    set('ParamBodyAngleZ', clamp(now.angleZ * 0.3, -10, 10));
-  });
+  // 顺序很关键：动作/表情先算完 → 我们把骨骼映射的参数盖上去 → 物理与求解 → 绘制
+  model.internalModel.on('afterMotionUpdate', applyParams);
 
   function layout() {
     const w = W();
@@ -127,31 +135,32 @@ export async function createAnimeBody({ canvas, modelUrl, onStatus }) {
   }
   layout();
 
+  // 神经面板里那几行字：让「骨骼 → 参数」这件事看得见
+  function paintBindPanel() {
+    if (!bindEl) bindEl = document.getElementById('bind-list');
+    if (!bindEl) return;
+    const panel = document.getElementById('nerves');
+    if (!panel || panel.hidden) return;
+    const rows = binder.rows;
+    if (!rows.length) return;
+    bindEl.hidden = false;
+    bindEl.textContent = '';
+    for (const r of rows) {
+      const line = document.createElement('div');
+      line.className = 'bind-row';
+      line.innerHTML = `<span class="bind-bone">${r.bone}</span><span class="bind-arrow">→</span><span class="bind-param">${r.param}</span><span class="bind-val">${r.value}</span>`;
+      bindEl.appendChild(line);
+    }
+  }
+
   function sync(brain, face, dt) {
     t += dt;
-    const pose = brain.state.pose;
-    const head = pose?.get?.('head');
-    const chest = pose?.get?.('chest');
-    const f = face?.state || {};
+
+    // ① 骨骼解算结果 → 42 个模型参数（真正的“接起来”在这一行）
+    params = binder.compute(brain.state.pose, face, brain, dt);
+    applyParams();
+
     const mood = brain.state.mood || 'calm';
-
-    const gazeX = clamp((f.gazeX || 0) / 3, -1, 1);
-    const gazeY = clamp((f.gazeY || 0) / 3, -1, 1);
-
-    now.angleX = damp(now.angleX, gazeX * 26, 5, dt);
-    now.angleY = damp(now.angleY, -gazeY * 20, 5, dt);
-    now.angleZ = damp(now.angleZ, clamp(-(head?.a || 0) * 34, -26, 26), 6, dt);
-
-    const blinking = f.blink || 0;
-    const open = clamp((f.eyeOpen ?? 1) * (1 - blinking) * (1 - 0.45 * (f.drowsy || 0)), 0, 1);
-    now.eye = damp(now.eye, open, 22, dt);
-
-    // 说话时嘴形跟着音节起伏
-    talkLevel = damp(talkLevel, brain.state.talking > 0 ? 1 : 0, 8, dt);
-    const syllable = 0.5 + 0.5 * Math.sin(t * 17.3) * Math.sin(t * 5.1);
-    now.mouth = clamp(talkLevel * syllable * 0.9 + (mood === 'happy' ? 0.1 : 0), 0, 1);
-    now.form = damp(now.form, MOUTH_FORM[mood] ?? 0.15, 4, dt);
-    now.breath = 0.5 + 0.5 * Math.sin(t * 1.35);
 
     // 被戳 → 播一个反应动作（她自己的运动程序，不是我们摆的姿势）
     const touch = brain.state.stats?.touches || 0;
@@ -163,6 +172,10 @@ export async function createAnimeBody({ canvas, modelUrl, onStatus }) {
         /* 没有这组动作就算了 */
       }
     }
+
+    // 面板里那几行“骨骼 → 参数”，实时刷
+    bindTick++;
+    if (bindTick % 8 === 0) paintBindPanel();
 
     // 换情绪时换表情（模型自带 8 套，失败就跳过）
     if (mood !== lastMood) {

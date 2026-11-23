@@ -704,6 +704,29 @@ input {
   text-align: center;
 }
 
+/* 骨骼 → 参数：面板里的小表 */
+.bind {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 10px;
+  font: 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.bind-row {
+  display: grid;
+  grid-template-columns: 44px 10px 1fr auto;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.bind-bone { color: rgba(244, 233, 241, 0.55); }
+.bind-arrow { color: rgba(255, 159, 190, 0.5); }
+.bind-param { color: #9ef0e0; letter-spacing: 0.01em; }
+.bind-val { color: #ffc8dd; font-variant-numeric: tabular-nums; }
+
 /* ————— toast ————— */
 .toast {
   position: fixed;
