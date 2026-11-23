@@ -275,7 +275,7 @@ function startSnapshots() {
       fetch('./shot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tag: `t${n}`, data }),
+        body: JSON.stringify({ tag: `t${n}-${body3d?.springOn ? 'spring' : 'rigid'}`, data }),
       }).catch(() => {});
     }
     if (n >= 6) clearInterval(timer);

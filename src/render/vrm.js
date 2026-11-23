@@ -149,9 +149,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 我们每帧都在改写骨架，弹簧在这套“被驱动的骨架”上极容易自激振荡，
   // 屏幕上就是头发乱甩、身体抽搐。关掉后头发刚性跟随头部，稳定第一。
   // 想看弹簧：地址加 ?spring=1
+  let springOn = false;
   try {
     const KEEP_SPRING = new URLSearchParams(globalThis.location?.search || '').get('spring') === '1';
-    if (!KEEP_SPRING) vrm.springBoneManager = null;
+    const sbm = vrm.springBoneManager;
+    if (sbm && !KEEP_SPRING) {
+      // 只把属性置空可能被只读属性挡掉，直接掐掉 update 才是真的关掉
+      sbm.update = () => {};
+      vrm.springBoneManager = null;
+    }
+    springOn = Boolean(vrm.springBoneManager);
   } catch {
     /* 关不掉就算了 */
   }
@@ -306,9 +313,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const h = canvas.clientHeight || window.innerHeight || 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    const dist = (height * 0.62) / Math.tan(camera.fov / 2 / DEG);
-    camera.position.set(0, height * 0.72, FRONT * dist * 1.06);
-    camera.lookAt(0, height * 0.58, 0);
+    // 竖屏手机里她应该占满画面（原来她只占 2/3，上下全是黑）
+    const visH = height * 0.98;
+    const dist = visH / (2 * Math.tan(camera.fov / 2 / DEG));
+    camera.position.set(0, height * 0.66, FRONT * dist);
+    camera.lookAt(0, height * 0.6, 0);
     camera.updateProjectionMatrix();
   }
   layout();
@@ -623,6 +632,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       }
       faceProbe = `手动 ${deg}°`;
       return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
+    },
+    get springOn() {
+      return springOn;
     },
     // 抓一帧画面（缩小后转 jpeg），用来上传给服务器落盘检查
     snapshot(maxW = 460) {
