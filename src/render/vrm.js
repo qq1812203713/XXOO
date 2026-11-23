@@ -447,6 +447,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     // 诊断：把“该动多少”和“实际写进去多少”都记下来
     lastDiag.poseSize = p.size ?? Object.keys(p).length;
     lastDiag.armA = j('arm_L_upper')?.a;
+    lastDiag.armLA = j('arm_L_upper')?.a;
+    lastDiag.armRA = j('arm_R_upper')?.a;
+    lastDiag.foreLA = j('arm_L_fore')?.a;
+    lastDiag.foreRA = j('arm_R_fore')?.a;
+    lastDiag.handLA = j('hand_L')?.a;
+    lastDiag.handRA = j('hand_R')?.a;
 
     // —— 躯干：绕世界 Z 轴侧倾，逐段累积 ——
     const pelvis = j('pelvis');
@@ -689,10 +695,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
           auto: vrm.humanoid.autoUpdateHumanBones,
         };
       };
+      const deg = (k) => {
+        const v = lastDiag[k];
+        return v === undefined || v === null ? null : +((v * 180) / Math.PI).toFixed(1);
+      };
       return {
         springOn,
         poseSize: lastDiag.poseSize,
         armA: lastDiag.armA === undefined ? null : +lastDiag.armA.toFixed(3),
+        arms: { L: deg('armLA'), R: deg('armRA'), foreL: deg('foreLA'), foreR: deg('foreRA'), handL: deg('handLA'), handR: deg('handRA') },
         rightUpperArm: q('rightUpperArm'),
         spine: q('spine'),
         restDirArm: rest.rightUpperArm?.dir ? rest.rightUpperArm.dir.toArray().map((v) => +v.toFixed(3)) : null,
