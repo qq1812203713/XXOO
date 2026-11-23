@@ -1,1 +1,179 @@
-# XXOO
+# 息 · XXOO
+
+> 一具住在浏览器里（以后是手机里）的身体：会呼吸、会累、会自己找事情做；
+> 每个脚趾都有自己的脚本，大脑只说“想要”，身体自己决定怎么做到。
+
+这是一个**可运行的纵向切片**，不是概念稿：打开就能看到她站着、眨眼、动脚趾、种东西、靠近你、记住你说过的话，离开再回来她记得你走了多久。
+
+```
+npm start          # 起一个静态服务器（python3 -m http.server 8000 --bind 0.0.0.0）
+npm test           # 无浏览器的 10 分钟“体外循环”测试
+npm run dom-test   # 在 jsdom 里真的加载页面、点她、跟她说话
+npm run visual     # 用 @napi-rs/canvas 在 Node 里渲染并截图到 test/shots/
+```
+
+第一次打开会有一个开场说明，点「进去」（或点遮罩任意位置）进入。手机上打开同一个地址即可（竖屏最佳）。
+
+### 打不开 / 没反应？
+
+- 开场遮罩点「进去」后必须消失；如果还停在那儿，是按到了旧缓存 —— 强制刷新一次（手机下拉刷新 / 桌面 Ctrl+Shift+R）。
+- 页面底部出现红色「出错了：…」时，把那行字告诉我，那就是具体原因。
+- 想自己跑：`npm start` 然后打开 <http://localhost:8000/>。
+
+## 你现在可以做的事
+
+| 动作 | 会发生什么 |
+| --- | --- |
+| 戳她的头 / 手 / 脚 | 反射先于想法：手指收缩、脚趾蜷起、惊讶表情、瞳孔放大 |
+| 按住并移动（抚摸） | 呼吸变慢、脸红、不安下降，“心跳”上升 |
+| 什么都不做，看她 | 她会自己换目标：发呆 → 走两步 → 种点东西 → 坐下休息 → 整理世界 |
+| 跟她说话 | 本地心智会回你；在设置里接上 OpenAI 兼容接口后，由大模型接管语言与念头 |
+| 打开「神经」 | 手脚关节实时放大图 + 运动日志：能看见哪个趾头正在被执行 |
+| 离开几小时再回来 | 她会用“你走了多久”开口，并记得离线期间世界长了什么 |
+| 设置里「清空她的一切」 | 身体、记忆、世界全部重来 |
+
+她的一切（包括 API Key）都只存在这台设备的 `localStorage` 里。
+
+## 她的样子：3D 身体（VRM）
+
+默认加载的是 **VRM 3D 模型**：`vendor/model/alicia/AliciaSolid.vrm`（Alicia Solid，由 DWANGO 制作）。
+它不是 Live2D 那种半身立绘，而是一具完整的 3D 人形——**55 根 humanoid 骨骼，其中 30 根是手指**
+（5 指 × 3 节 × 2 手）。所以「每根手指一个 motor」这件事，终于能在画面上看见了。
+
+渲染是 three.js + `@pixiv/three-vrm`，全部 vendored 在 `vendor/` 里，不联网。
+
+### 重定向：不是塞角度，是“把骨头指向该去的地方”
+
+一开始我把 2D 角度直接写进 `rotation.z`，结果就是一具会扭的稻草人——肘往侧面折、膝反向弯。
+现在的做法是真正的姿态重定向：
+
+1. 载入时记下每根骨在 T-pose 下的**世界朝向**与**世界四元数**；
+2. 每帧从骨架解算出每根骨想要的**世界方向**（上臂朝哪、前臂朝哪、指尖朝哪）；
+3. 用「把静止方向旋到目标方向」的最小旋转求出目标世界四元数；
+4. 换算成相对父骨的局部四元数写回去。
+
+这样不依赖任何一家绑骨的局部轴 convention，而且关节发生在解剖学正确的平面上：
+
+- **肘**：绕「上臂 × 前方向」的轴转 → 永远是往**前**弯的；
+- **膝**：绕 +X 转，且只取非负角 → 只会往**后**弯，不会反折；
+- **髋**：走路的摆动放在矢状面（forward/back），不是左右劈叉；
+- **手指**：卷曲轴 = 指骨静止方向 × 掌心朝下，再**跟着手腕一起转**，所以手臂举起来时手指仍然朝掌心卷；
+- **左右**：我们骨架的 `L/R` 是画面左右，VRM 的 `left/right` 是她本人的左右——她面朝镜头，所以必须互换。
+
+### 骨骼对照表
+
+| 我们的关节 | VRM 骨骼 | 换算 |
+| --- | --- | --- |
+| `pelvis` / `spine1` / `chest` | `hips` `spine` `chest` `upperChest` | 逐段角度 → `rotation.z`（符号翻转） |
+| `neck` / `head` | `neck` `head` | 倾角 → Z，视线 → Y/X |
+| `arm_L_upper.a` | `leftUpperArm` | T-pose 指 +X，故 `φ = π/2 − a` |
+| `arm_R_upper.a` | `rightUpperArm` | 指 −X，故 `φ = −π/2 − a` |
+| `arm_*_fore.a − arm_*_upper.a` | `left/rightLowerArm` | 屈肘 = 相对角 |
+| `hand_*` | `left/rightHand` | 腕部相对角 |
+| `L_index_0..2` | `leftIndexProximal/Intermediate/Distal` | **逐节**，2D 局部角 → 绕 Z 卷曲 |
+| `L_thumb_0..1` | `leftThumbProximal/Intermediate/Distal` | 拇指只有两节，末端借用第二节 ×0.7 |
+| `leg_*_thigh` / `_shin` / `foot_*` | `UpperLeg` / `LowerLeg` / `Foot` | 膝在矢状面，故绕 X |
+| 五根脚趾平均 | `left/rightToes` | 模型只有一根脚趾骨，只能整体压 |
+| `face.gazeX/Y` | `leftEye` `rightEye` | 眼球真的会转向你 |
+| 说话 / 眨眼 / 情绪 | blendShape `a` `blink` `joy` `sorrow` `fun` `angry` | — |
+
+### 三级降级
+
+```
+3D VRM  ──失败──▶  Live2D  ──失败──▶  原 2D 骨架
+```
+
+也可以用 URL 参数强制指定：`?body=vrm` / `?body=live2d` / `?body=2d`。
+
+### 许可（必须说清楚）
+
+Alicia Solid © DWANGO Co., Ltd.，VRM 元数据里标注 `licenseName: Other`。
+**仅适用于个人学习/评估，不能商用、不能二次分发模型文件。**
+真要上线，请换成自有模型或购买授权的 VRM。
+
+## 她的样子：Live2D（备用）
+
+画面里那具身体现在是一个真正的二次元模型 —— **Haru**（Live2D 官方 Cubism 4 示例模型，2048 贴图），
+连同 Cubism Core 4.2.2、PIXI 6、`pixi-live2d-display` 一起放在 `vendor/` 里，**全部本地、不联网、不依赖 CDN**。
+
+它不是贴上来的一张会动的图。驱动关系仍然是「大脑 → 想要 → 身体自己实现」：
+
+| 大脑里的东西 | 模型上的结果 |
+| --- | --- |
+| 头骨角度 / 躯干倾角 | `ParamAngleX/Y/Z`、`ParamBodyAngleZ` |
+| 视线、注意力 | `ParamAngleX/Y`、`ParamEyeBallX/Y` |
+| 眨眼、困倦（脑干） | `ParamEyeLOpen/ROpen` |
+| 说话的嘴（音节起伏） | `ParamMouthOpenY` |
+| 情绪 | `ParamMouthForm`、眉毛、8 套表情之一 |
+| 被戳 | 播模型自带的 `Tap` 动作（不是我摆的姿势） |
+| 呼吸 | `ParamBreath` |
+
+### 骨骼 → 模型的每一条线
+
+`src/render/bind.js` 是那条“接起来”的线。骨架里每个关节解算出来的角度/位移，被翻译成模型参数：
+
+| 骨骼（关节 id） | 模型参数 | 说明 |
+| --- | --- | --- |
+| `head.a` + `neck.a` | `ParamAngleZ` | 歪头 |
+| `head.x - chest.x` + 视线 | `ParamAngleX` | 转头看你 |
+| `gazeY` / 头部位移 | `ParamAngleY` | 抬/低头 |
+| `chest` `spine1` `spine2` 累加 | `ParamBodyAngleZ` `ParamBodyUpper` | 腰背的倾 |
+| `pelvis.x` / 呼吸 | `ParamBodyAngleX` `ParamBreath` | 重心与呼吸 |
+| `arm_L_upper.a`（相对静息 π） | `ParamArmLA` | 抬肩 |
+| `arm_L_fore.a - arm_L_upper.a` | `ParamArmLB`（0 直 … 5 全弯） | 屈肘 |
+| `hand_L.a - arm_L_fore.a` | `ParamHandAngleL` | 手腕 |
+| `face.blink` `face.eyeOpen` | `ParamEyeLOpen/ROpen` | 眨眼 |
+| `face.gazeX/Y` | `ParamEyeBallX/Y` | 眼球 |
+| `brain.state.talking` | `ParamMouthOpenY` | 说话 |
+| 情绪 | `ParamMouthForm` `ParamEye*Smile` `ParamBrow*` `ParamTear` | 表情 |
+| 头的角速度 | `ParamScarf` `ParamHair*` | 围巾与头发（物理再叠一层） |
+
+共驱动 **31 个参数**。这些不是拍脑袋写的数字：`test/bind.test.mjs` 会用 Live2D 官方 Core
+解析真实 moc3，拿到这 42 个参数的合法区间，跑 1800 帧，逐条断言“参数名存在、值不越界、而且真的在变”。
+
+没有 WebGL（或模型加载失败）时，页面会安静地退回原来那具 Canvas 2D 身体，不会白屏、不会报错。
+
+**诚实的两点**：
+
+- 每根手指/脚趾的 motor 仍然在跑（神经面板里能数出来），但 Haru 这个模型没有手指参数，所以画面上看不到手指各自动。
+  要看得见，得换成带手部骨骼的 VRM（3D）模型 —— 那是下一步的事。
+- Haru 是 Live2D 官方的示例模型，按 Live2D 的许可只能用于评估/个人学习；要商用得自己持有授权或换自制模型。
+
+## 目录
+
+```
+src/
+  body/
+    skeleton.js        骨架树：60+ 关节，纯数据
+    servo.js           伺服层：每根骨头的临界阻尼弹簧
+    ik.js              两骨 IK（小脑用的）
+    motors/
+      hand.js          手：手势 → 20 节指骨，各自有相位/延迟/抽动
+      foot.js          脚：脚踝 + 10 节趾骨，每个趾头独立
+      torso.js         躯干：呼吸、重心、歪头
+      arm.js           手臂：闲置摆动 / 伸手 / 挥手
+      leg.js           腿：站 / 走 / 坐
+      face.js          脸：情绪 → 表情参数
+      index.js         运动程序注册表
+  brain/
+    drives.js          下丘脑：疲倦、好奇、想见你、不安、心跳
+    goals.js           目标竞标：把张力翻译成“此刻想做的事”
+    spinal.js          脑干：呼吸、眨眼、重心、发抖
+    cortex.js          皮层：本地心智 + 可选大模型
+    brain.js           总装：需求 → 目标 → 意图 → 运动程序
+  memory/memory.js     情节记忆、事实、检索、离线叙事
+  world/world.js       空世界 + 按真实时间生长的东西
+  render/renderer.js   Canvas 2D：体积、神经线、头发、脸、世界、手势涟漪
+  ui/ui.js             很薄的 DOM 壳
+  main.js              组装 + 主循环 + 存档
+docs/ARCHITECTURE.md   设计说明：为什么这样分层，以及“自主意识”到底是什么
+test/                  sim（10 分钟人生）/ dom（真页面）/ visual（渲染色截图）
+```
+
+## 三条设计原则
+
+1. **身体先于人格。** 先把“有一具身体、有自己的节奏、会被碰到”做扎实，再谈语言。反过来做出来的东西永远像客服。
+2. **大脑不碰关节。** 大脑只输出意图（看那边 / 伸手 / 坐下 / 手张开），运动程序负责分解到每节指骨。这是你描述的“每个脚趾一个脚本”的正确工程实现，也是真机器人、游戏动画的标准做法。
+3. **连续性 > 聪明。** 她会记得、会离线生活、世界会随时间变化。让人觉得“她还活着”的，几乎从来不是模型参数，而是这些连续性。
+
+想深入看为什么这样拆、以及怎么一步步做成你想要的“惊世骇俗”，读 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
