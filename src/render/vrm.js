@@ -932,6 +932,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         mode: LEGACY ? 'legacy' : 'mixer',
         clip: lastDiag.clip,
         played: actsPlayed,
+        t: +t.toFixed(1),
+        nextActAt: +nextActAt.toFixed(1),
         poseSize: lastDiag.poseSize,
         armA: lastDiag.armA === undefined ? null : +lastDiag.armA.toFixed(3),
         arms: { L: deg('armLA'), R: deg('armRA'), foreL: deg('foreLA'), foreR: deg('foreRA'), handL: deg('handLA'), handR: deg('handRA') },
@@ -949,7 +951,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         // 后台标签页里 rAF 会停，画布上留的是几千帧前的旧图。
         // 截图前强制推一帧，拍到的才是“现在”。
         if (lastBrain) {
-          poseFromRig(lastBrain, lastFace, 1 / 60);
+          if (LEGACY) poseFromRig(lastBrain, lastFace, 1 / 60);
+          else {
+            mixer.update(1 / 60);
+            applyFace(lastBrain, lastFace);
+          }
           vrm.update(1 / 60);
           renderer.render(scene, camera);
         }
