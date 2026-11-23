@@ -146,8 +146,16 @@ async function bootBody() {
       body3d = await create3DBody({
         canvas: girl3dCanvas,
         modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
+        onStatus: (msg) => {
+          const el = document.getElementById('ver');
+          if (el) el.dataset.status = msg;
+        },
       });
       if (body3d) {
+        document.getElementById('flip')?.addEventListener('click', () => {
+          const deg = body3d?.turnBody?.(180);
+          hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
+        });
         if (typeof renderer.setBodyVisible === 'function') renderer.setBodyVisible(false);
         girl3dCanvas?.classList.add('on');
         markAwake('3D 身体（VRM）');
@@ -262,9 +270,32 @@ requestAnimationFrame(loop);
 // —— 版本徽章 + 旧版提醒 ——
 // 这几个月最耗时间的坑不是代码，是“你看到的根本不是最新那版”。所以让它自己说出来。
 const BUILD = document.querySelector('meta[name="build"]')?.content || 'dev';
+function hudNote(msg) {
+  const el = document.getElementById('hud-state');
+  if (!el) return;
+  const prev = el.textContent;
+  el.textContent = msg;
+  setTimeout(() => {
+    if (el.textContent === msg) el.textContent = prev;
+  }, 2600);
+}
+
 (function stampVersion() {
   const el = document.getElementById('ver');
-  if (el) el.textContent = `#${String(BUILD).slice(-4)}`;
+  const paint = () => {
+    const e = document.getElementById('ver');
+    if (!e) return;
+    const base = `#${String(BUILD).slice(-4)}`;
+    let f = NaN;
+    try {
+      f = body3d?.facingDeg?.() ?? NaN;
+    } catch {
+      f = NaN;
+    }
+    e.textContent = Number.isFinite(f) ? `${base} · 朝${f.toFixed(0)}°` : base;
+  };
+  paint();
+  setInterval(paint, 1200);
   const check = async () => {
     try {
       const r = await fetch(`./version?t=${Date.now()}`, { cache: 'no-store' });

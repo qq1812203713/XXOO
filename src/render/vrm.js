@@ -139,6 +139,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (vrm.meta?.metaVersion === '0') vrm.scene.rotation.y = Math.PI;
   }
   // 模型挂在一个外壳上：转动外壳，永远不怕别处改写 vrm.scene.rotation
+  const FACE_KEY = 'xxoo.faceOffset';
   const holder = new THREE.Group();
   holder.add(vrm.scene);
   scene.add(holder);
@@ -186,7 +187,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return null;
   };
 
-  vrm.update(0);
+  vrm.humanoid.update();
   {
     let facing = measureFacing();
     if (facing) {
@@ -201,13 +202,21 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     } else {
       faceProbe = '没量到（已硬转 180°）';
     }
-    const forced = Number(new URLSearchParams(globalThis.location?.search || '').get('face'));
-    if (Number.isFinite(forced) && forced !== 0) {
+    const qs = new URLSearchParams(globalThis.location?.search || '');
+    const forced = Number(qs.get('face'));
+    if (qs.has('face') && Number.isFinite(forced) && forced !== 0) {
       holder.rotation.y += (forced * Math.PI) / 180;
       faceProbe += ` + 手动 ${forced}°`;
+    } else {
+      // 上次用「转身」按钮调好的角度，记在这里
+      const saved = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
+      if (Number.isFinite(saved) && saved !== 0) {
+        holder.rotation.y += (saved * Math.PI) / 180;
+        faceProbe += ` + 存 ${saved}°`;
+      }
     }
     vrm.scene.updateMatrixWorld(true);
-    vrm.update(0);
+    vrm.humanoid.update();
     onStatus?.(`已醒来 · 3D 身体（VRM）· 朝向 ${faceProbe}`);
   }
 
@@ -516,13 +525,14 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     ready = true;
   }
 
-  vrm.update(0);
+  // 弹簧骨复位后再跑一帧（别用 dt=0，物理里除零会让头发炸开）
   poseFromRig({ state: { pose: null } }, null, 0);
   try {
     vrm.springBoneManager?.reset?.();
   } catch {
     /* 没有就算了 */
   }
+  vrm.update(1 / 60);
   renderer.render(scene, camera);
   // 弹簧骨在首帧容易因为“骨架刚被换过”而弹飞，半秒后再复位一次
   setTimeout(() => {
