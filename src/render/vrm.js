@@ -93,9 +93,8 @@ const EXPRESSIONS = {
 export const MODELS = {
   alicia: { url: './vendor/model/alicia/AliciaSolid.vrm', cn: '爱丽丝', note: 'VRoid 官方 · 白裙金发' },
   sampleA: { url: './vendor/model/sampleA/AvatarSample_A.vrm', cn: '小明', note: 'VRoid 官方样张 A · 制服' },
-  seed: { url: './vendor/model/seed/Seed-san.vrm', cn: '见子', note: 'VRM 官方样张 · 短发' },
 };
-export const MODEL_ORDER = ['alicia', 'sampleA', 'seed'];
+export const MODEL_ORDER = ['alicia', 'sampleA'];
 
 export const REQUIRED_BONES = (() => {
   const out = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftEye', 'rightEye'];

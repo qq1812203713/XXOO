@@ -34,9 +34,12 @@ const vrmExt = json.extensions?.VRM || json.extensions?.VRMC_vrm;
 assert.ok(vrmExt, '没有 VRM 扩展，这不是 VRM 模型');
 
 // —— 骨架 ——
-const bones = new Set(
-  (vrmExt.humanoid?.humanBones || vrmExt.humanoid?.humanBones || []).map((b) => b.bone || b.node),
-);
+// VRM0 的 humanBones 是数组 [{bone, node}]，VRM1.0 是对象 {hips:{node},...} —— 两种都认
+const hb = vrmExt.humanoid?.humanBones || [];
+const boneList = Array.isArray(hb)
+  ? hb.map((b) => b.bone ?? b.node)
+  : Object.entries(hb).map(([k, v]) => v?.node ?? k);
+const bones = new Set(boneList.map((b) => String(b)));
 const boneNames = new Set([...bones].map(String));
 console.log(`模型骨架 ${boneNames.size} 根（${vrmExt.meta?.title || vrmExt.meta?.name || '未命名'}）`);
 
@@ -80,4 +83,41 @@ console.log(`表情：用到 ${USED_EXPRESSIONS.join('/')}，模型都有（共 
 // —— 身体部件数量 ——
 console.log(`网格 ${json.meshes?.length} 个，材质 ${json.materials?.length} 个，节点 ${json.nodes?.length} 个`);
 console.log('OK');
-process.exit(0);
+
+// —— 其余几具建模：换身体不能把骨架换掉 ——
+const MODELS_DIR = path.join(ROOT, 'vendor/model');
+for (const dir of fs.readdirSync(MODELS_DIR)) {
+  const d = path.join(MODELS_DIR, dir);
+  if (!fs.statSync(d).isDirectory()) continue;
+  for (const f of fs.readdirSync(d)) {
+    if (!f.endsWith('.vrm')) continue;
+    const p = path.join(d, f);
+    if (p === MODEL) continue;
+    const b = fs.readFileSync(p);
+    let js = null;
+    let o = 12;
+    const tot = b.readUInt32LE(8);
+    while (o < tot) {
+      const len = b.readUInt32LE(o);
+      const tt = b.readUInt32LE(o + 4);
+      if (tt === 0x4e4f534a) js = JSON.parse(b.subarray(o + 8, o + 8 + len).toString('utf8'));
+      o += 8 + len;
+      o += (4 - (o % 4)) % 4;
+    }
+    const ext = js?.extensions?.VRM || js?.extensions?.VRMC_vrm;
+    assert.ok(ext, `${f} 不是 VRM`);
+    const list = Array.isArray(ext.humanoid?.humanBones)
+      ? ext.humanoid.humanBones.map((x) => x.bone ?? x.node)
+      : Object.keys(ext.humanoid?.humanBones || {});
+    const names = new Set(list.map(String));
+    // 这几根是“有更好、没有也能跑”的：代码里所有写入都对缺失骨做了空判断
+    const OPTIONAL = new Set(['upperChest', 'leftEye', 'rightEye', 'leftThumbIntermediate', 'rightThumbIntermediate']);
+    const miss = REQUIRED_BONES.filter((x) => !OPTIONAL.has(x) && !names.has(x));
+    assert.deepEqual(miss, [], `${f} 缺少骨骼：${miss.join(', ')}`);
+    const lacking = REQUIRED_BONES.filter((x) => OPTIONAL.has(x) && !names.has(x));
+    const fingers = [...names].filter((x) => /(Thumb|Index|Middle|Ring|Little)(Proximal|Intermediate|Distal)$/.test(x)).length;
+    console.log(
+      `  ${f} 可用 · ${names.size} 根骨头 · ${fingers} 根指骨${lacking.length ? ` · 少 ${lacking.join('/')}（可缺省）` : ''}`,
+    );
+  }
+}
