@@ -118,12 +118,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40);
 
+  // 这套模型的脸在 -Z 一侧（拆 GLB 量过：眼睛 z≈-0.051，脚趾 z≈-0.060）。
+  // 与其反复拧模型，不如把相机放到她脸的那一边 —— 这是几何事实，不会被
+  // 矩阵缓存、保存的角度、版本号里的隐藏旋转任何一项抵消。
+  const FRONT = -1;
   const key = new THREE.DirectionalLight(0xfff2f6, 2.6);
-  key.position.set(1.2, 2.4, 2.2);
+  key.position.set(1.2, 2.4, 2.2 * FRONT);
   const fill = new THREE.DirectionalLight(0x9fb8ff, 1.1);
-  fill.position.set(-2, 1.2, 1.4);
+  fill.position.set(-2, 1.2, 1.4 * FRONT);
   const rim = new THREE.DirectionalLight(0xff9fbe, 2.0);
-  rim.position.set(0.4, 1.6, -2.4);
+  rim.position.set(0.4, 1.6, -2.4 * FRONT);
   const amb = new THREE.HemisphereLight(0xbfd4ff, 0x281a30, 1.2);
   scene.add(key, fill, rim, amb);
 
@@ -211,7 +215,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
 
   vrm.humanoid.update();
   {
-    const before = measureFacing();
     const qs = new URLSearchParams(globalThis.location?.search || '');
     const forced = Number(qs.get('face'));
     let extra = 0;
@@ -220,33 +223,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     } else {
       let saved = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
       if (Number.isFinite(saved)) {
-        saved = ((saved % 360) + 360) % 360; // 归一到 0..359
-        if (saved > 180) saved -= 360; // 归一到 -179..180
+        saved = ((saved % 360) + 360) % 360;
+        if (saved > 180) saved -= 360;
         extra = saved;
       }
     }
-
-    if (before) {
-      // 一次到位：把她现在的朝向直接拧到 +Z
-      holder.rotation.y = (-deg(before) * Math.PI) / 180 + (extra * Math.PI) / 180;
-      scene.updateMatrixWorld(true);
-      const after = measureFacing();
-      faceProbe = `${deg(before).toFixed(0)}°→${after ? deg(after).toFixed(0) : '?'}°`;
-      if (after && after.z < 0) {
-        // 还是不朝镜头：再拧半圈（说明前面算出来的方向是反的）
-        holder.rotation.y += Math.PI;
-        scene.updateMatrixWorld(true);
-        const last = measureFacing();
-        faceProbe += ` →${last ? deg(last).toFixed(0) : '?'}°(补半圈)`;
-      }
-    } else {
-      holder.rotation.y = Math.PI + (extra * Math.PI) / 180;
-      faceProbe = '没量到，硬转180';
-    }
-    faceYaw = (holder.rotation.y * 180) / Math.PI;
+    holder.rotation.y = (extra * Math.PI) / 180;
     scene.updateMatrixWorld(true);
     vrm.humanoid.update();
-    onStatus?.(`已醒来 · 3D 身体（VRM）· 朝向 ${faceProbe}`);
+    faceProbe = extra ? `手动 ${extra}°` : '相机在她正面';
+    onStatus?.(`已醒来 · 3D 身体（VRM）· ${faceProbe}`);
   }
 
   // ————————————————— 静止姿态采集 —————————————————
@@ -304,7 +290,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     const dist = (height * 0.62) / Math.tan(camera.fov / 2 / DEG);
-    camera.position.set(0, height * 0.72, dist * 1.06);
+    camera.position.set(0, height * 0.72, FRONT * dist * 1.06);
     camera.lookAt(0, height * 0.58, 0);
     camera.updateProjectionMatrix();
   }
@@ -596,10 +582,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       faceProbe = `手动 ${deg}°`;
       return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
     },
-    // 当前实测朝向（度）：0 = 正对镜头，±180 = 背对
-    facingDeg() {
+    // 她的正面是否朝着相机：+1 正对，-1 背对
+    facingCamera() {
       const f = measureFacing();
-      return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
+      if (!f) return NaN;
+      const toCam = new V().subVectors(camera.position, new V(0, 1.2, 0)).setY(0);
+      if (toCam.lengthSq() < 1e-9) return NaN;
+      return f.dot(toCam.normalize());
     },
     get faceProbe() {
       return faceProbe;

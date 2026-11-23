@@ -288,17 +288,12 @@ function hudNote(msg) {
     const base = `v${document.querySelector('meta[name="version"]')?.content || '?'}`;
     let f = NaN;
     try {
-      f = body3d?.facingDeg?.() ?? NaN;
+      f = body3d?.facingCamera?.() ?? NaN;
     } catch {
       f = NaN;
     }
-    let probe = '';
-    try {
-      probe = String(body3d?.faceProbe || '').replace(/\s/g, '').slice(0, 16);
-    } catch {
-      probe = '';
-    }
-    e.textContent = Number.isFinite(f) ? `${base}·${f.toFixed(0)}°` : probe ? `${base}·${probe}` : base;
+    const tag = Number.isFinite(f) ? (f > 0.3 ? '正' : f < -0.3 ? '背' : '侧') : '';
+    e.textContent = tag ? `${base}·${tag}` : base;
   };
   paint();
   setInterval(paint, 1200);

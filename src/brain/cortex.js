@@ -163,6 +163,15 @@ export function createCortex({ settings, log } = {}) {
         });
       }
 
+      // https 页面调 http 接口 = 混合内容，浏览器在发请求之前就拦掉，
+      // 报错只会是含糊的 Failed to fetch。这里直接把原因说清楚。
+      if (globalThis.location?.protocol === 'https:' && /^http:\/\//i.test(base)) {
+        throw new Error(
+          `地址是 http，而页面是 https —— 浏览器禁止这种请求（混合内容），请求根本没发出去。` +
+            `把接口换成 https：${base.replace(/^http:/i, 'https:').replace(/\/v1$/, '')}`,
+        );
+      }
+
       const errors = [];
       let res = null;
       for (const attempt of attempts) {
