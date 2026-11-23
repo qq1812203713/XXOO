@@ -121,6 +121,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // 脸贴得很近时，原来的直出会把皮肤打成一团白（高光全clip）。
+  // ACES 把高光压回来，睫毛/腮红/瞳孔才有层次。
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
   renderer.setClearAlpha(0);
 
   const scene = new THREE.Scene();
@@ -130,13 +134,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 与其反复拧模型，不如把相机放到她脸的那一边 —— 这是几何事实，不会被
   // 矩阵缓存、保存的角度、版本号里的隐藏旋转任何一项抵消。
   const FRONT = -1;
-  const key = new THREE.DirectionalLight(0xfff2f6, 2.6);
+  const key = new THREE.DirectionalLight(0xfff2f6, 1.45);
   key.position.set(1.2, 2.4, 2.2 * FRONT);
-  const fill = new THREE.DirectionalLight(0x9fb8ff, 1.1);
+  const fill = new THREE.DirectionalLight(0x9fb8ff, 0.45);
   fill.position.set(-2, 1.2, 1.4 * FRONT);
-  const rim = new THREE.DirectionalLight(0xff9fbe, 2.0);
+  const rim = new THREE.DirectionalLight(0xff9fbe, 0.8);
   rim.position.set(0.4, 1.6, -2.4 * FRONT);
-  const amb = new THREE.HemisphereLight(0xbfd4ff, 0x281a30, 1.2);
+  const amb = new THREE.HemisphereLight(0xbfd4ff, 0x281a30, 0.55);
   scene.add(key, fill, rim, amb);
 
   const loader = new GLTFLoader();
@@ -565,14 +569,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 情绪慢慢靠过去，眨眼是随机的，说话时嘴形在 a/i/u/e/o 之间走。
   const FACE_W = { joy: 0, sorrow: 0, fun: 0, angry: 0, neutral: 0 };
   const MOUTH_W = { a: 0, i: 0, u: 0, e: 0, o: 0 };
+  // 权重不是越大越好：joy 拉到 0.9 这具模型的眼睛会直接眯成一条缝。
   const EMO = {
-    calm: { joy: 0.12, neutral: 0.3 },
-    happy: { joy: 0.92, fun: 0.18 },
-    shy: { fun: 0.66, joy: 0.3 },
-    curious: { joy: 0.34, fun: 0.2 },
-    sleepy: { sorrow: 0.4, neutral: 0.34 },
-    sad: { sorrow: 0.84 },
-    startled: { angry: 0.2, joy: 0.12 },
+    calm: { joy: 0.16, neutral: 0.3 },
+    happy: { joy: 0.55, fun: 0.4 },
+    shy: { fun: 0.6, joy: 0.22 },
+    curious: { joy: 0.3, fun: 0.22 },
+    sleepy: { sorrow: 0.36, neutral: 0.34 },
+    sad: { sorrow: 0.7 },
+    startled: { angry: 0.18, joy: 0.14 },
   };
   let moodOverride = null; // 自检用：?mood=happy
   let blinkNext = 2.4;
@@ -670,9 +675,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
     headNode.getWorldPosition(tmpV3);
     // 头的骨点在下颌附近 —— 往上看一点，才是「脸」在画面正中
-    const faceAt = tmpV3.clone().add(new V(0, height * 0.055, 0));
-    // 0.62 m：整张脸装得下，睫毛和瞳孔还看得清（0.42 时脸会出框）
-    const near = faceAt.clone().add(new V(0, height * 0.012, FRONT * 0.62));
+    const faceAt = tmpV3.clone().add(new V(0, height * 0.042, 0));
+    // 0.9 m：头顶的蝴蝶结、下巴、肩膀上缘都在框里
+    const near = faceAt.clone().add(new V(0, height * 0.02, FRONT * 0.9));
     camera.position.lerpVectors(camHome.pos, near, faceView);
     const lookAt = new V().lerpVectors(camHome.tgt, faceAt, faceView);
     camera.lookAt(lookAt);

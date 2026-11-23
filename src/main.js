@@ -226,6 +226,7 @@ async function tryBoot3D() {
       if (f.get('face') === '1') {
         body3d.setFaceView(true);
         document.getElementById('faceview')?.classList.add('on');
+        setInterval(() => body3d?.setFaceView(true), 5000); // 自检：钉住看脸模式
       }
     } catch {
       /* ignore */
