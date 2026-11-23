@@ -172,6 +172,101 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   holder.add(vrm.scene);
   scene.add(holder);
 
+  // ————————————————— 世界：地面 + 远处的景物 —————————————————
+  // 她站在原点不动，舞台绕着她转 —— 这样镜头永远在她正面，
+  // 而地面、石头、树会随着她走动真实地往后掠过去。
+  const stage = new THREE.Group();
+  scene.add(stage);
+
+  // 模型的原点不一定在脚底 —— 先用包围盒量出她真正站在哪
+  const bbox = new THREE.Box3().setFromObject(vrm.scene);
+  const floorY = bbox.min.y;
+  console.log('[world] bbox', bbox.min.y.toFixed(3), bbox.max.y.toFixed(3));
+
+  function groundTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 256, 256);
+    grad.addColorStop(0, '#131a2b');
+    grad.addColorStop(0.5, '#1a2236');
+    grad.addColorStop(1, '#121826');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    g.strokeStyle = 'rgba(120,170,255,0.20)';
+    g.lineWidth = 1.5;
+    for (let i = 0; i <= 256; i += 64) {
+      g.beginPath();
+      g.moveTo(i, 0);
+      g.lineTo(i, 256);
+      g.moveTo(0, i);
+      g.lineTo(256, i);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(150,200,255,0.05)';
+    g.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(24, 24);
+    tex.anisotropy = 4;
+    return tex;
+  }
+
+  {
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(160, 160),
+      new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.95, metalness: 0 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    const land = new THREE.Group();
+    land.position.y = floorY;
+    stage.add(land);
+    ground.position.y = 0;
+    land.add(ground);
+    scene.fog = new THREE.Fog(0x0b0d14, 5.5, 20);
+
+    // 固定种子：世界是稳定的，不会每帧变样
+    let seed = 20261122;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const crystalMat = new THREE.MeshStandardMaterial({ color: 0x8fd2ff, emissive: 0x2a6fa8, emissiveIntensity: 0.5, roughness: 0.3 });
+    const treeMat = new THREE.MeshStandardMaterial({ color: 0x2b4a63, roughness: 0.9 });
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe3b0, emissive: 0xffb35c, emissiveIntensity: 1.4 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a2333, roughness: 1 });
+
+    for (let i = 0; i < 90; i++) {
+      const a = rnd() * Math.PI * 2;
+      const r = 3.2 + rnd() * 34;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      const kind = rnd();
+      let m;
+      if (kind < 0.5) {
+        const h = 0.35 + rnd() * 1.4;
+        m = new THREE.Mesh(new THREE.ConeGeometry(0.16 + rnd() * 0.22, h, 6), treeMat);
+        m.position.y = h / 2;
+        const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.28, 5), trunkMat);
+        tr.position.y = 0.14;
+        m.add(tr);
+      } else if (kind < 0.82) {
+        const s0 = 0.12 + rnd() * 0.3;
+        m = new THREE.Mesh(new THREE.OctahedronGeometry(s0, 0), crystalMat);
+        m.position.y = s0 * 0.9;
+        m.rotation.y = rnd() * 3;
+      } else {
+        m = new THREE.Mesh(new THREE.SphereGeometry(0.05 + rnd() * 0.05, 8, 8), lampMat);
+        m.position.y = 0.5 + rnd() * 0.9;
+      }
+      m.position.x = x;
+      m.position.z = z;
+      m.userData.seed = rnd();
+      land.add(m);
+    }
+  }
+
+  vrm.scene.traverse((o) => {
+    if (o.isMesh || o.isSkinnedMesh) o.frustumCulled = false;
+  });
+
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
   const V = THREE.Vector3;
   let faceYaw = 0; // 朝向校正了多少度，写进 ?debug=1 面板
@@ -370,6 +465,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   function writeLocal(name, targetWorldQ) {
     const b = node(name);
     if (!b) return;
+    if (!Number.isFinite(targetWorldQ.x + targetWorldQ.y + targetWorldQ.z + targetWorldQ.w)) return;
     const pName = PARENT.get(name);
     const parentQ = pName ? (wq.get(pName) || restWorldQ.get(pName) || IDENT) : IDENT;
     const local = parentQ.clone().invert().multiply(targetWorldQ);
@@ -705,8 +801,127 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return new THREE.AnimationClip(name, keys[keys.length - 1].t, tracks);
   }
 
-  // 一具“站着”的身体：所有轨道都以它为底，差别只在参数
+  // ————————————————— 腿：两段 IK（髋 → 膝 → 踝） —————————————————
+  // 参考真实步态的做法：先定“脚落在哪里”，再用两段 IK 反解大腿和小腿。
+  // 直接给大腿一个角度是画不出迈步的 —— 脚会飘、会插进地里。
+  const X_AXIS = new V(1, 0, 0);
+  const Z_AXIS = new V(0, 0, 1);
+  const Y_AXIS = new V(0, 1, 0);
+  const LEG = {};
+  for (const s of ['left', 'right']) {
+    const hip = rest[`${s}UpperLeg`];
+    const knee = rest[`${s}LowerLeg`];
+    const ankle = rest[`${s}Foot`];
+    if (!hip || !knee || !ankle) continue;
+    LEG[s] = {
+      hip: hip.pos.clone(),
+      L1: hip.pos.distanceTo(knee.pos),
+      L2: knee.pos.distanceTo(ankle.pos),
+      ankle: ankle.pos.clone(),
+      footDir: rest[`${s}Foot`].dir.clone(),
+    };
+  }
+
+  // 髋在 hip、踝想去 ankle，求膝的位置（膝盖朝前弯）
+  function solveLeg(s, ankleTarget, sink = 0) {
+    const L = LEG[s];
+    if (!L) return;
+    const hip = L.hip.clone().addScaledVector(Y_AXIS, -sink);
+    const toA = ankleTarget.clone().sub(hip);
+    const maxd = (L.L1 + L.L2) * 0.995;
+    let d = toA.length();
+    if (d > maxd) {
+      toA.multiplyScalar(maxd / d);
+      d = maxd;
+    }
+    if (d < 1e-4) return;
+    const dir = toA.clone().normalize();
+    const a = (L.L1 * L.L1 - L.L2 * L.L2 + d * d) / (2 * d);
+    const h = Math.sqrt(Math.max(0, L.L1 * L.L1 - a * a));
+    let pole = FORWARD.clone().sub(dir.clone().multiplyScalar(FORWARD.dot(dir)));
+    if (pole.lengthSq() < 1e-6) pole = new V(0, 0, -1);
+    pole.normalize();
+    const kneeP = hip.clone().addScaledVector(dir, a).addScaledVector(pole, h);
+    const ankleP = hip.clone().addScaledVector(dir, d);
+    aim(`${s}UpperLeg`, kneeP.clone().sub(hip).normalize());
+    aim(`${s}LowerLeg`, ankleP.clone().sub(kneeP).normalize());
+  }
+
+  const WALK = { T: 1.05, stride: 0.26, lift: 0.055, duty: 0.62, sink: 0.035 };
+  WALK.speed = (WALK.stride * 2) / WALK.T; // 米/秒 —— 步子多大就走多快，脚不打滑
+
+  // 一个完整的步态周期：p=0 右脚跟着地
+  function gaitLeg(s, p, cfg = WALK) {
+    const L = LEG[s];
+    if (!L) return;
+    const base = L.ankle;
+    let z;
+    let y = base.y;
+    let pitch;
+    if (p < cfg.duty) {
+      // 支撑相：脚定在地上，相对身体往后走 —— 这就是“不打滑”的关键
+      const u = p / cfg.duty;
+      z = -cfg.stride / 2 + cfg.stride * u;
+      pitch = u < 0.18 ? ((0.18 - u) / 0.18) * 0.26 : u > 0.72 ? -((u - 0.72) / 0.28) * 0.5 : 0;
+    } else {
+      // 摆动相：抬脚、往前送
+      const u = (p - cfg.duty) / (1 - cfg.duty);
+      const e = u * u * (3 - 2 * u);
+      z = cfg.stride / 2 - cfg.stride * e;
+      y = base.y + cfg.lift * Math.sin(Math.PI * u);
+      pitch = -0.18 + 0.42 * e;
+    }
+    solveLeg(s, new V(base.x, y, base.z + z), cfg.sink);
+    aim(`${s}Foot`, rotateAround(L.footDir, X_AXIS, pitch));
+  }
+
+  // 手指：30 根，逐节卷曲。轴要跟着手腕一起转，否则手指会朝反方向翻。
+  const FINGER_SEGS = ['Proximal', 'Intermediate', 'Distal'];
+  const FINGER_WEIGHT = {
+    Thumb: [0.6, 0.75, 0.6],
+    Index: [0.5, 0.9, 0.55],
+    Middle: [0.5, 0.95, 0.6],
+    Ring: [0.5, 0.9, 0.55],
+    Little: [0.55, 0.85, 0.5],
+  };
+  function poseFingers(bs, curl) {
+    if (!curl) return;
+    const dh = handDelta(`${bs}Hand`);
+    const axis = Z_AXIS.clone().applyQuaternion(dh);
+    const handDir = rest[`${bs}Hand`]?.dir;
+    const sign = -(handDir && handDir.x < 0 ? -1 : 1); // 手心那一侧
+    for (const f of Object.keys(FINGER_WEIGHT)) {
+      const w = FINGER_WEIGHT[f];
+      let acc = 0;
+      for (let i = 0; i < 3; i++) {
+        const n = `${bs}${f}${FINGER_SEGS[i]}`;
+        const r = rest[n];
+        if (!r || !node(n)) continue;
+        acc += w[i] * curl;
+        aim(n, rotateAround(r.dir.clone().applyQuaternion(dh), axis, sign * acc));
+      }
+    }
+  }
+
+  // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
   const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
+  function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = 0) {
+    const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'R' : 'L']).clone().normalize();
+    const raise = clamp(1 + dir.y, 0, 1);
+    const sRest = rest[`${bs}Shoulder`]?.dir;
+    if (sRest) aim(`${bs}Shoulder`, rotateAround(sRest, Y_AXIS, (bs === 'right' ? 1 : -1) * 0.18 * raise));
+    aim(`${bs}UpperArm`, dir);
+    let axis = new V().crossVectors(dir, FORWARD);
+    if (axis.lengthSq() < 1e-6) axis = X_AXIS.clone();
+    axis.normalize();
+    const flex = Math.max(elbow, 0.05 + 0.3 * raise);
+    const dirFore = rotateAround(dir, axis, flex);
+    aim(`${bs}LowerArm`, dirFore);
+    aim(`${bs}Hand`, rotateAround(dirFore, axis, hand));
+    poseFingers(bs, curl);
+  }
+
+  // 一具“站着”的身体：所有轨道都以它为底，差别只在参数
   function basePose(cfg = {}) {
     const {
       breath = 0,
@@ -716,8 +931,10 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       headRoll = 0,
       armL = null,
       armR = null,
+      swing = 0,
       elbow = 0.16,
       hand = 0.08,
+      curl = 0.14,
     } = cfg;
 
     turn('hips', { x: 0, y: sway * 0.05, z: sway * 0.022 });
@@ -727,71 +944,105 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     turn('neck', { x: headPitch * 0.3, y: headYaw * 0.3, z: headRoll * 0.3 });
     turn('head', { x: headPitch * 0.6, y: headYaw * 0.62, z: headRoll * 0.6 });
 
-    for (const side of ['L', 'R']) {
-      const s = side === 'L' ? 'right' : 'left'; // 画面左 = 她的右手
-      const raw = (side === 'L' ? armL : armR) || ARM_HANG[side];
-      const dir = raw.clone().normalize();
-      const raise = clamp(1 + dir.y, 0, 1);
-
-      // 手臂抬起来时肩膀跟着抬 —— 胳膊要从肩胛骨长出来
-      const sRest = rest[`${s}Shoulder`]?.dir;
-      if (sRest) {
-        aim(`${s}Shoulder`, rotateAround(sRest, new V(0, 0, s === 'right' ? 1 : -1), 0.18 * raise));
-      }
-      aim(`${s}UpperArm`, dir);
-
-      // 肘：绕「上臂 × 前方」弯，永远往前弯；再给一个最小弯曲，别锁死
-      let axis = new V().crossVectors(dir, FORWARD);
-      if (axis.lengthSq() < 1e-6) axis = new V(1, 0, 0);
-      axis.normalize();
-      const flex = Math.max(elbow, 0.05 + 0.3 * raise);
-      const dirFore = rotateAround(dir, axis, flex);
-      aim(`${s}LowerArm`, dirFore);
-      aim(`${s}Hand`, rotateAround(dirFore, axis, hand));
+    // 站姿：双脚就在原地（腿也要解一次 IK，膝盖才不是锁死的）
+    for (const s of ['left', 'right']) {
+      if (!LEG[s]) continue;
+      solveLeg(s, LEG[s].ankle.clone(), 0.006);
+      aim(`${s}Foot`, LEG[s].footDir.clone());
     }
+
+    poseArm('right', armL, elbow, hand, curl);
+    poseArm('left', armR, elbow, hand, curl);
   }
 
   const NEUTRAL = () => basePose({});
 
+  function walkPose(p) {
+    const s2 = Math.sin(2 * Math.PI * p);
+    turn('hips', { x: 0.03, y: -s2 * 0.06, z: s2 * 0.035 });
+    turn('spine', { x: 0.02, y: s2 * 0.04, z: -s2 * 0.015 });
+    turn('chest', { x: 0.02, y: s2 * 0.05 });
+    turn('upperChest', { x: 0, y: s2 * 0.03 });
+    turn('neck', { x: -0.05 });
+    turn('head', { x: -0.03, y: -s2 * 0.05 });
+    gaitLeg('left', p % 1);
+    gaitLeg('right', (p + 0.5) % 1);
+    // 手臂与同侧的腿反向摆
+    const swingDir = (bs) => rotateAround(ARM_HANG[bs === 'right' ? 'R' : 'L'], X_AXIS, s2 * 0.42 * (bs === 'right' ? 1 : -1));
+    poseArm('right', swingDir('right'), 0.3, 0.12, 0.25);
+    poseArm('left', swingDir('left'), 0.3, 0.12, 0.25);
+  }
+
+  // 原地转身：重心移到一只脚上，另一只脚抬起来换个方向
+  function turnPose(dir, k) {
+    const yaw = dir * 0.6 * k;
+    turn('hips', { x: 0.02, y: yaw * 0.6 });
+    turn('spine', { x: 0.03, y: yaw * 0.2 });
+    turn('chest', { x: 0.03, y: yaw * 0.15 });
+    turn('neck', { y: yaw * 0.1 });
+    turn('head', { y: yaw * 0.25 });
+    const swingSide = dir > 0 ? 'right' : 'left';
+    for (const s of ['left', 'right']) {
+      if (!LEG[s]) continue;
+      const base = LEG[s].ankle;
+      const lift = s === swingSide ? Math.sin(Math.PI * k) * 0.07 : 0;
+      solveLeg(s, new V(base.x, base.y + lift, base.z + (s === swingSide ? -0.02 : 0)), 0.012 + lift * 0.4);
+      aim(`${s}Foot`, rotateAround(LEG[s].footDir, X_AXIS, lift > 0 ? 0.24 : 0));
+    }
+    poseArm('right', null, 0.22, 0.1, 0.16);
+    poseArm('left', null, 0.22, 0.1, 0.16);
+  }
+
   const CLIPS = {
-    // 站立待机：呼吸 + 重心左右 + 极慢的视线游移
     idle: bakeClip('idle', [
-      { t: 0, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0 }) },
-      { t: 1.2, fn: () => basePose({ breath: 1, sway: 0.7, headYaw: 0.06, headRoll: 0.03 }) },
-      { t: 2.4, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0.02 }) },
-      { t: 3.6, fn: () => basePose({ breath: -1, sway: -0.7, headYaw: -0.07, headRoll: -0.03 }) },
-      { t: 4.8, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0 }) },
+      { t: 0, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
+      { t: 1.2, fn: () => basePose({ breath: 1, sway: 0.7, headYaw: 0.06, headRoll: 0.03, curl: 0.16 }) },
+      { t: 2.4, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0.02, curl: 0.2 }) },
+      { t: 3.6, fn: () => basePose({ breath: -1, sway: -0.7, headYaw: -0.07, headRoll: -0.03, curl: 0.14 }) },
+      { t: 4.8, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
+    ]),
+    // 走路：两个步幅一个循环，首尾同帧 —— 循环起来无缝
+    walk: bakeClip('walk', Array.from({ length: 25 }, (_, i) => {
+      const p = i / 24;
+      return { t: p * WALK.T, fn: () => walkPose(p) };
+    })),
+    turnL: bakeClip('turnL', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(1, k) }))),
+    turnR: bakeClip('turnR', [0, 0.25, 0.5, 0.75, 1].map((k) => ({ t: k * 0.75, fn: () => turnPose(-1, k) }))),
+    // 手指：握一下再张开（30 根一起，是“她真的在用手”的证据）
+    grip: bakeClip('grip', [
+      { t: 0, fn: () => basePose({ curl: 0.15 }) },
+      { t: 0.35, fn: () => basePose({ curl: 0.95, elbow: 0.34, hand: 0.2, headPitch: 0.12 }) },
+      { t: 0.8, fn: () => basePose({ curl: 0.95, elbow: 0.34, hand: 0.2, headPitch: 0.12 }) },
+      { t: 1.3, fn: () => basePose({ curl: 0.12 }) },
     ]),
     lookL: bakeClip('lookL', [
       { t: 0, fn: NEUTRAL },
       { t: 0.5, fn: () => basePose({ headYaw: 0.42, headPitch: -0.05, sway: 0.3 }) },
-      { t: 1.6, fn: () => basePose({ headYaw: 0.40, headPitch: -0.04, sway: 0.28 }) },
+      { t: 1.6, fn: () => basePose({ headYaw: 0.4, headPitch: -0.04, sway: 0.28 }) },
       { t: 2.4, fn: NEUTRAL },
     ]),
     lookR: bakeClip('lookR', [
       { t: 0, fn: NEUTRAL },
       { t: 0.5, fn: () => basePose({ headYaw: -0.42, headPitch: -0.05, sway: -0.3 }) },
-      { t: 1.6, fn: () => basePose({ headYaw: -0.40, headPitch: -0.04, sway: -0.28 }) },
+      { t: 1.6, fn: () => basePose({ headYaw: -0.4, headPitch: -0.04, sway: -0.28 }) },
       { t: 2.4, fn: NEUTRAL },
     ]),
-    // 伸手：肩抬、肘弯、手朝前下方 —— 不再是横着的一根棍子
     reachL: bakeClip('reachL', [
       { t: 0, fn: NEUTRAL },
-      { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, headPitch: 0.12, sway: 0.25 }) },
-      { t: 1.5, fn: () => basePose({ armL: new V(0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, headPitch: 0.14, sway: 0.3 }) },
+      { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: 0.25 }) },
+      { t: 1.5, fn: () => basePose({ armL: new V(0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: 0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
     reachR: bakeClip('reachR', [
       { t: 0, fn: NEUTRAL },
-      { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, headPitch: 0.12, sway: -0.25 }) },
-      { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, headPitch: 0.14, sway: -0.3 }) },
+      { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: -0.25 }) },
+      { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: -0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
-    // 伸个懒腰
     stretch: bakeClip('stretch', [
       { t: 0, fn: NEUTRAL },
-      { t: 1.0, fn: () => basePose({ armL: new V(0.42, 0.86, -0.2), armR: new V(-0.42, 0.86, -0.2), elbow: 0.22, headPitch: -0.2, breath: 0.8 }) },
-      { t: 2.0, fn: () => basePose({ armL: new V(0.5, 0.8, -0.3), armR: new V(-0.5, 0.8, -0.3), elbow: 0.3, headPitch: -0.24, breath: 0.6 }) },
+      { t: 1.0, fn: () => basePose({ armL: new V(0.42, 0.86, -0.2), armR: new V(-0.42, 0.86, -0.2), elbow: 0.22, headPitch: -0.2, breath: 0.8, curl: 0.05 }) },
+      { t: 2.0, fn: () => basePose({ armL: new V(0.5, 0.8, -0.3), armR: new V(-0.5, 0.8, -0.3), elbow: 0.3, headPitch: -0.24, breath: 0.6, curl: 0.05 }) },
       { t: 3.0, fn: NEUTRAL },
     ]),
   };
@@ -800,20 +1051,33 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const actions = {};
   for (const [name, clip] of Object.entries(CLIPS)) {
     const a = mixer.clipAction(clip);
-    if (name === 'idle') {
-      a.setLoop(THREE.LoopRepeat, Infinity);
-      a.play();
-    } else {
+    if (name === 'idle' || name === 'walk') a.setLoop(THREE.LoopRepeat, Infinity);
+    else {
       a.setLoop(THREE.LoopOnce, 1);
       a.clampWhenFinished = false;
     }
     actions[name] = a;
   }
+  actions.idle.play();
+  mixer.update(0); // 第一帧先摆好，否则会闪一帧 T-pose
+
+  // 自检用：?freeze=0.25 停在走路的某个相位，?nav=walk 强制一直走
+  const QS = new URLSearchParams(
+    [globalThis.location?.search?.replace(/^\?/, '') || '', globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'),
+  );
+  const FORCE_NAV = QS.get('nav');
+  const FREEZE = QS.get('freeze');
+  if (FREEZE != null) {
+    actions.idle.stop();
+    actions.walk.reset().play();
+    actions.walk.paused = true;
+    actions.walk.time = (parseFloat(FREEZE) || 0) * WALK.T;
+  }
+
   let current = 'idle';
-  let nextActAt = 2.5;
   let actsPlayed = 0;
 
-  function playAction(name, fade = 0.55) {
+  function playAction(name, fade = 0.45) {
     const to = actions[name];
     if (!to || name === current) return;
     const from = actions[current];
@@ -826,29 +1090,96 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   mixer.addEventListener('finished', (e) => {
-    if (e.action && e.action !== actions.idle) {
-      const from = e.action;
-      const idle = actions.idle;
-      idle.reset();
-      idle.setEffectiveWeight(1);
-      idle.play();
-      idle.crossFadeFrom(from, 0.5, false);
-      current = 'idle';
-    }
+    if (!e.action || e.action === actions.idle) return;
+    if (e.action === actions.walk) return;
+    const idle = actions.idle;
+    idle.reset();
+    idle.setEffectiveWeight(1);
+    idle.play();
+    idle.crossFadeFrom(e.action, 0.4, false);
+    current = 'idle';
   });
 
-  // 她自己决定什么时候做点什么 —— 不是每帧算出来的，是“一段一段的动作”
-  function direct(brain) {
-    if (current !== 'idle') return;
-    if (t < nextActAt) return;
-    const r = Math.random();
-    if (r < 0.34) playAction(r < 0.17 ? 'lookL' : 'lookR');
-    else if (r < 0.6) playAction(r < 0.47 ? 'reachL' : 'reachR');
-    else if (r < 0.74) playAction('stretch');
-    else playAction(r < 0.87 ? 'lookL' : 'lookR');
-    nextActAt = t + 3 + Math.random() * 4.5;
+  // ————————————————— 她自己去哪 —————————————————
+  // 走路用“世界反过来动”的办法：镜头不离她，她永远面对你；
+  // 转身 = 世界绕她转过去一点 + 身上放一段原地转身的动作。
+  const nav = {
+    mode: 'idle',
+    until: 2.2,
+    yaw: 0,
+    yawFrom: 0,
+    yawTo: 0,
+    t0: 0,
+    dir: 1,
+    travel: new V(),
+    walked: 0,
+  };
+
+  function startTurn(dir) {
+    nav.mode = 'turn';
+    nav.dir = dir;
+    nav.t0 = t;
+    nav.yawFrom = nav.yaw;
+    nav.yawTo = nav.yaw + dir * (0.55 + Math.random() * 0.5);
+    playAction(dir > 0 ? 'turnL' : 'turnR', 0.3);
   }
 
+  function startWalk(sec) {
+    nav.mode = 'walk';
+    nav.until = t + sec;
+    playAction('walk', 0.35);
+  }
+
+  function applyStage() {
+    if (!stage) return;
+    if (!Number.isFinite(nav.travel.x + nav.travel.z + nav.yaw)) {
+      nav.travel.set(0, 0, 0);
+      nav.yaw = 0;
+    }
+    stage.rotation.y = -nav.yaw;
+    stage.position.set(-nav.travel.x, 0, -nav.travel.z).applyAxisAngle(Y_AXIS, -nav.yaw);
+  }
+
+  function driveNav(dt) {
+    if (FREEZE != null) {
+      nav.mode = 'freeze';
+      return;
+    }
+    if (FORCE_NAV === 'walk') {
+      if (nav.mode !== 'walk') startWalk(600);
+      nav.travel.z -= WALK.speed * dt;
+      nav.walked += WALK.speed * dt;
+      applyStage();
+      return;
+    }
+    if (nav.mode === 'turn') {
+      const k = clamp((t - nav.t0) / 0.75, 0, 1);
+      const e = k * k * (3 - 2 * k);
+      nav.yaw = nav.yawFrom + (nav.yawTo - nav.yawFrom) * e;
+      if (k >= 1) {
+        nav.mode = 'idle';
+        nav.until = t + 0.8;
+      }
+    } else if (nav.mode === 'walk') {
+      nav.travel.z -= WALK.speed * dt; // 她朝自己的前方走，脚下的地往后滑
+      nav.walked += WALK.speed * dt;
+      if (t > nav.until) {
+        nav.mode = 'idle';
+        nav.until = t + 1.6;
+        playAction('idle', 0.45);
+      }
+    } else if (t > nav.until && current === 'idle') {
+      const r = Math.random();
+      if (r < 0.4) startTurn(Math.random() < 0.5 ? -1 : 1);
+      else if (r < 0.62) startWalk(2.4 + Math.random() * 3);
+      else if (r < 0.74) playAction('grip');
+      else if (r < 0.85) playAction(r < 0.795 ? 'lookL' : 'lookR');
+      else if (r < 0.94) playAction(r < 0.895 ? 'reachL' : 'reachR');
+      else playAction('stretch');
+      nav.until = t + 3 + Math.random() * 4;
+    }
+    applyStage();
+  }
 
   const LEGACY = new URLSearchParams(globalThis.location?.search || '').get('anim') === 'legacy';
 
@@ -860,7 +1191,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (LEGACY) {
       poseFromRig(brain, face, step);
     } else {
-      direct(brain); // 她自己挑一段动作
+      driveNav(step); // 她自己决定走、转、还是做点什么
       mixer.update(step); // 标准插值 / 混合
       lastDiag.poseSize = 'mixer';
       lastDiag.clip = current;
@@ -933,7 +1264,13 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         clip: lastDiag.clip,
         played: actsPlayed,
         t: +t.toFixed(1),
-        nextActAt: +nextActAt.toFixed(1),
+        nav: nav.mode,
+        cam: camera.position.toArray().map((x) => +x.toFixed(2)),
+        floorY: +floorY.toFixed(3),
+        travel: [+nav.travel.x.toFixed(2), +nav.travel.z.toFixed(2)],
+        stageP: stage ? stage.position.toArray().map((x) => +x.toFixed(2)) : null,
+        yaw: +nav.yaw.toFixed(2),
+        walked: +nav.walked.toFixed(1),
         poseSize: lastDiag.poseSize,
         armA: lastDiag.armA === undefined ? null : +lastDiag.armA.toFixed(3),
         arms: { L: deg('armLA'), R: deg('armRA'), foreL: deg('foreLA'), foreR: deg('foreRA'), handL: deg('handLA'), handR: deg('handRA') },

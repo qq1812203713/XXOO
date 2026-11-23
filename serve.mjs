@@ -185,7 +185,19 @@ const server = http.createServer((req, res) => {
     let body = buf;
     if (type.startsWith('text/html')) {
       // 把构建号写进 HTML，页面上就能显示“我是哪一版”——排查缓存问题全靠它
-      body = Buffer.from(buf.toString('utf8').replaceAll('__BUILD__', BUILD), 'utf8');
+      let html = buf.toString('utf8').replaceAll('__BUILD__', BUILD);
+      // 自检开关：仓库里放一个 .flags 文件（如 freeze=0.25&every=0.4），
+      // 注入到页面里 —— 我不需要用户帮我改地址栏，也不用重定向。
+      let flags = '';
+      try {
+        flags = fs.readFileSync(path.join(ROOT, '.flags'), 'utf8').trim();
+      } catch {
+        /* 没有就不管 */
+      }
+      if (flags) {
+        html = html.replace('</head>', `<script>window.__XXOO_FLAGS__=${JSON.stringify(flags)}</script></head>`);
+      }
+      body = Buffer.from(html, 'utf8');
     }
     if (type.startsWith('text/javascript') && !rel.includes('/vendor/')) {
       const rewritten = bustImports(buf.toString('utf8'));
