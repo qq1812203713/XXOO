@@ -122,6 +122,25 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 页面把错误发回来，直接打在服务器日志上（我看日志就等于看控制台）
+  if (rel === '/log' && req.method === 'POST') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      let msg = '';
+      try {
+        const j = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        msg = `${j.level || 'info'}: ${j.msg}`;
+      } catch {
+        msg = Buffer.concat(chunks).toString('utf8').slice(0, 500);
+      }
+      console.log(`[page] ${msg}`);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+
   // 页面自己截图发回来，落盘到 shots/。
   // 这样我不必再让用户“帮我截一张”，能直接看到屏幕上是什么。
   if (rel === '/shot' && req.method === 'POST') {

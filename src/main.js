@@ -16,6 +16,25 @@ import { createUI } from './ui/ui.js';
 import { createAnimeBody } from './render/live2d.js';
 import { create3DBody } from './render/vrm.js';
 
+// 把浏览器里的错误回传到服务器日志：我看日志就等于看控制台
+let reported = 0;
+function reportToServer(msg, level = 'error') {
+  if (reported++ > 12) return;
+  try {
+    fetch('./log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level, msg: String(msg).slice(0, 900) }),
+    }).catch(() => {});
+  } catch {
+    /* 断网就算了 */
+  }
+}
+window.addEventListener('error', (e) => reportToServer(`${e.message} @${e.filename}:${e.lineno}`, 'error'));
+window.addEventListener('unhandledrejection', (e) =>
+  reportToServer(`unhandled: ${e.reason && e.reason.stack ? e.reason.stack : e.reason}`, 'reject'),
+);
+
 // 任何未捕获的错误都直接写在屏幕上，而不是留一个黑屏让人猜
 function showFatal(message) {
   if (window.__report) {
@@ -253,6 +272,7 @@ function loop(now) {
     ui.frame(dt, Date.now());
   } catch (err) {
     console.error(err);
+    reportToServer(`loop: ${err && err.stack ? err.stack : err}`, 'loop');
     ui.toast(`出错了：${err && err.message ? err.message : err}`, 6000);
   }
 
