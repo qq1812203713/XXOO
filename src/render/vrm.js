@@ -1173,7 +1173,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
-  const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
+  // 手臂自然下垂：不是贴着身体（会穿模），也不是 45° 摊开 —— 离身体 ~11°，
+  // 这个角度在宽肩/曲线体型上都不会插进裙子，也不会看起来像在展示。
+  const ARM_HANG = { L: new V(0.19, -0.975, 0.05), R: new V(-0.19, -0.975, 0.05) };
   function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = 0) {
     const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'L' : 'R']).clone().normalize();
     const raise = clamp(1 + dir.y, 0, 1);
