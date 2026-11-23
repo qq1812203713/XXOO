@@ -107,9 +107,10 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   let nerveTab = { side: 'L', part: 'body' };
 
   // 自检：把神经面板自己截下来回传，这样我能直接看到它长什么样
-  const FLAGS = globalThis.__XXOO_FLAGS__ || '';
-  const NERVE_SHOT = /nerveshot/.test(FLAGS);
-  const tabFlag = /ntab=([LR]):(hand|foot|body)/.exec(FLAGS);
+  // 自检开关只认地址栏上的 ?dev=1（页面注入的 flags 不再能让它自己弹出来）
+  const DEV = new URLSearchParams(globalThis.location?.search || '').get('dev') === '1';
+  const NERVE_SHOT = DEV;
+  const tabFlag = DEV ? /ntab=([LR]):(hand|foot|body)/.exec(globalThis.location?.search || '') : null;
   if (tabFlag) nerveTab = { side: tabFlag[1], part: tabFlag[2] };
   let lastNerveShot = 0;
   let heroTabBound = false;
@@ -143,7 +144,7 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   }
 
   $('open-nerves').addEventListener('click', () => openNerves(refs.nerves.hidden));
-  if (/nerves(=|&|$)/.test(FLAGS)) openNerves(true);
+  if (DEV) openNerves(true);
   $('open-settings').addEventListener('click', () => openSettings(true));
   for (const btn of document.querySelectorAll('[data-close]')) {
     btn.addEventListener('click', () => {
