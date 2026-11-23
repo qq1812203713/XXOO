@@ -292,7 +292,13 @@ function hudNote(msg) {
     } catch {
       f = NaN;
     }
-    e.textContent = Number.isFinite(f) ? `${base} · 朝${f.toFixed(0)}°` : base;
+    let probe = '';
+    try {
+      probe = String(body3d?.faceProbe || '').replace(/\s/g, '').slice(0, 16);
+    } catch {
+      probe = '';
+    }
+    e.textContent = Number.isFinite(f) ? `${base}·${f.toFixed(0)}°` : probe ? `${base}·${probe}` : base;
   };
   paint();
   setInterval(paint, 1200);

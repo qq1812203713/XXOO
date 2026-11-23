@@ -133,11 +133,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const vrm = gltf.userData.vrm;
   if (!vrm) throw new Error('这个文件不是 VRM（没有 humanoid）');
 
-  try {
-    VRMUtils.rotateVRM0(vrm);
-  } catch {
-    if (vrm.meta?.metaVersion === '0') vrm.scene.rotation.y = Math.PI;
-  }
+  // 不再调用 VRMUtils.rotateVRM0：它会按版本号偷偷转半圈，转没转无从得知。
+  // 朝向统一由下面的实测决定，只有一个入口。
   // 模型挂在一个外壳上：转动外壳，永远不怕别处改写 vrm.scene.rotation
   const FACE_KEY = 'xxoo.faceOffset';
   const holder = new THREE.Group();
@@ -150,11 +147,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   let faceProbe = '没量到';
   const Q = THREE.Quaternion;
 
-  // —— 朝向 ——
-  // 已经拆开模型文件量过：她的左脚趾指向 -Z、眼睛在 -Z 一侧 ⇒ 原件面朝 -Z，
-  // 而相机在 +Z。所以这里**无条件**先转 180°，再用实测结果自我验证并打日志。
-  holder.rotation.y = Math.PI;
-
+  // —— 朝向：只有一个入口，一次算到底 ——
   const boneOf = (n) => {
     try {
       return vrm.humanoid.getRawBoneNode?.(n) || node(n) || null;
@@ -163,8 +156,32 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
   };
 
+  // 三个独立证据，谁先算出来用谁：
+  //  1) 眼睛的网格相对头骨在前方（和骨骼系统完全无关，最硬）
+  //  2) 脚趾相对脚掌的方向
+  //  3) 左右肩连线叉乘向上 = 前方
+  const eyeForward = () => {
+    const head = boneOf('head');
+    if (!head) return null;
+    const hp = new V();
+    head.getWorldPosition(hp);
+    let best = null;
+    vrm.scene.traverse((o) => {
+      if (best || !o.isMesh) return;
+      if (!/^eye/i.test(o.name || '')) return;
+      // 用网格的世界包围盒中心（节点原点可能不在眼睛上）
+      const box = new THREE.Box3().setFromObject(o);
+      const p = box.isEmpty() ? o.getWorldPosition(new V()) : box.getCenter(new V());
+      const d = p.clone().sub(hp).setY(0);
+      if (d.lengthSq() > 1e-10) best = d.normalize();
+    });
+    return best;
+  };
+
   const measureFacing = () => {
     vrm.scene.updateMatrixWorld(true);
+    const eye = eyeForward();
+    if (eye) return eye;
     const f = new V();
     const tt = new V();
     const fb = boneOf('leftFoot');
@@ -187,34 +204,39 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return null;
   };
 
+  const deg = (v) => (Math.atan2(v.x, v.z) * 180) / Math.PI;
+
   vrm.humanoid.update();
   {
-    let facing = measureFacing();
-    if (facing) {
-      faceProbe = `${((Math.atan2(facing.x, facing.z) * 180) / Math.PI).toFixed(1)}°`;
-      // 转完还是背对（z<0）就再转半圈；两次仍未面向 +Z 说明测量本身有问题
-      if (facing.z < 0) {
-        holder.rotation.y += Math.PI;
-        vrm.scene.updateMatrixWorld(true);
-        const again = measureFacing();
-        if (again) faceProbe = `修正后 ${((Math.atan2(again.x, again.z) * 180) / Math.PI).toFixed(1)}°`;
-      }
-    } else {
-      faceProbe = '没量到（已硬转 180°）';
-    }
+    const before = measureFacing();
     const qs = new URLSearchParams(globalThis.location?.search || '');
     const forced = Number(qs.get('face'));
-    if (qs.has('face') && Number.isFinite(forced) && forced !== 0) {
-      holder.rotation.y += (forced * Math.PI) / 180;
-      faceProbe += ` + 手动 ${forced}°`;
+    let extra = 0;
+    if (qs.has('face') && Number.isFinite(forced)) {
+      extra = forced;
     } else {
-      // 上次用「转身」按钮调好的角度，记在这里
       const saved = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
-      if (Number.isFinite(saved) && saved !== 0) {
-        holder.rotation.y += (saved * Math.PI) / 180;
-        faceProbe += ` + 存 ${saved}°`;
-      }
+      if (Number.isFinite(saved)) extra = saved;
     }
+
+    if (before) {
+      // 一次到位：把她现在的朝向直接拧到 +Z
+      holder.rotation.y = (-deg(before) * Math.PI) / 180 + (extra * Math.PI) / 180;
+      vrm.scene.updateMatrixWorld(true);
+      const after = measureFacing();
+      faceProbe = `${deg(before).toFixed(0)}°→${after ? deg(after).toFixed(0) : '?'}°`;
+      if (after && after.z < 0) {
+        // 还是不朝镜头：再拧半圈（说明前面算出来的方向是反的）
+        holder.rotation.y += Math.PI;
+        vrm.scene.updateMatrixWorld(true);
+        const last = measureFacing();
+        faceProbe += ` →${last ? deg(last).toFixed(0) : '?'}°(补半圈)`;
+      }
+    } else {
+      holder.rotation.y = Math.PI + (extra * Math.PI) / 180;
+      faceProbe = '没量到，硬转180';
+    }
+    faceYaw = (holder.rotation.y * 180) / Math.PI;
     vrm.scene.updateMatrixWorld(true);
     vrm.humanoid.update();
     onStatus?.(`已醒来 · 3D 身体（VRM）· 朝向 ${faceProbe}`);
@@ -551,6 +573,29 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     rest,
     debugLines,
     sync,
+    // 手动转身：每按一次 +deg（默认 180），并记住到下次打开
+    turnBody(deg = 180) {
+      holder.rotation.y += (deg * Math.PI) / 180;
+      vrm.scene.updateMatrixWorld(true);
+      vrm.humanoid.update();
+      const f = measureFacing();
+      try {
+        const prev = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
+        globalThis.localStorage?.setItem(FACE_KEY, String((Number.isFinite(prev) ? prev : 0) + deg));
+      } catch {
+        /* 隐私模式 */
+      }
+      faceProbe = `手动 ${deg}°`;
+      return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
+    },
+    // 当前实测朝向（度）：0 = 正对镜头，±180 = 背对
+    facingDeg() {
+      const f = measureFacing();
+      return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
+    },
+    get faceProbe() {
+      return faceProbe;
+    },
     resize: layout,
     get ready() {
       return ready;
