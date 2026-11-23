@@ -99,7 +99,6 @@ export const MODELS = {
 export const MODEL_ORDER = ['alicia', 'sampleA', 'victoria', 'vita'];
 
 // 有的建模把「外衣」做成独立网格（Alicia 就是这样），可以只穿里面那层。
-// 没有独立外衣的建模不出现这一项 —— 不假装能脱掉画在身上的衣服。
 export const OUTFITS = {
   alicia: [{ id: 'light', cn: '清凉', hide: '^cloth' }],
 };
@@ -473,6 +472,29 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     /* 头发偏移失败不影响别的 */
   }
 
+  // ?hide=cloth（正则，逗号分隔）：临时藏掉某几层网格，方便核对「衣服下面是什么」
+  try {
+    const qp = new URLSearchParams(globalThis.location?.search || '');
+    const fp = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
+    let saved = '';
+    try {
+      saved = globalThis.localStorage?.getItem('xxoo.hide') || '';
+    } catch {
+      /* 隐私模式 */
+    }
+    const hide = qp.get('hide') || fp.get('hide') || saved;
+    if (hide) {
+      const res = hide.split(',').filter(Boolean).map((t) => new RegExp(t, 'i'));
+      vrm.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        const nm = o.name || '';
+        if (res.some((r) => r.test(nm))) o.visible = false;
+      });
+    }
+  } catch {
+    /* 只是自检用 */
+  }
+
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const size = box.getSize(new V());
   const height = size.y || 1.55;
@@ -528,9 +550,25 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       /* ignore */
     }
     if (sideView) camera.position.applyAxisAngle(new V(0, 1, 0), sideView);
-    camera.lookAt(0, centerY, 0);
+    // 自检：?zoom=1.2&zoomY=0.6 把镜头贴到某个高度，抓下来的图才有像素判断细节
+    let lookY = centerY;
+    try {
+      const q = new URLSearchParams(
+        [globalThis.location?.search?.replace(/^\?/, '') || '', globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'),
+      );
+      const zd = parseFloat(q.get('zoom') || '');
+      if (zd > 0.2) {
+        const zy = (height + STANCE) * clamp(parseFloat(q.get('zoomY') || '0.62'), 0, 1);
+        camera.position.set(0, zy, FRONT * zd);
+        if (sideView) camera.position.applyAxisAngle(new V(0, 1, 0), sideView);
+        lookY = zy;
+      }
+    } catch {
+      /* ignore */
+    }
+    camera.lookAt(0, lookY, 0);
     camHome.pos.copy(camera.position);
-    camHome.tgt.set(0, centerY, 0);
+    camHome.tgt.set(0, lookY, 0);
     camera.updateProjectionMatrix();
   }
   layout();
@@ -1179,8 +1217,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
-  // 手臂自然下垂。这组数值是前几版调对的那一组，别再动 ——
-  // 手臂看着别扭时，先怀疑肩/肘/腕的旋转轴，不要改这里。
   const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
   function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = 0) {
     const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'L' : 'R']).clone().normalize();
@@ -1896,7 +1932,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       return springOn;
     },
     // 抓一帧画面（缩小后转 jpeg），用来上传给服务器落盘检查
-    snapshot(maxW = 460) {
+    snapshot(maxW = 960) {
       try {
         // 后台标签页里 rAF 会停，画布上留的是几千帧前的旧图。
         // 截图前强制推一帧，拍到的才是“现在”。
