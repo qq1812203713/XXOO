@@ -497,10 +497,21 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const dirUp = new V(Math.sin(aUp), Math.cos(aUp), 0);
       dirUp.z = 0.18 * (side === 'L' ? 1 : 1);
       dirUp.normalize();
+      // 手臂抬起来时，肩膀必须跟着抬一点 —— 否则就是一根从躯干里长出来的棍子。
+      // raise: 0 = 完全垂下, 1 = 水平及以上
+      const raise = clamp(1 + dirUp.y, 0, 1);
+      const shoulderName = `${s}Shoulder`;
+      const sRest = rest[shoulderName]?.dir;
+      if (sRest) {
+        const liftAxis = new V(0, 0, s === 'right' ? 1 : -1);
+        aim(shoulderName, rotateAround(sRest, liftAxis, 0.20 * raise));
+      }
+
       aim(`${s}UpperArm`, dirUp);
 
       // 屈肘：绕「上臂 × 前方向」的轴转，肘永远是往**前**弯的
-      const flex = Math.abs(wrap((fore?.a ?? aUp) - aUp));
+      // 肘不能锁死：真实的手臂永远带一点弯，抬得越高弯得越多
+      const flex = Math.max(Math.abs(wrap((fore?.a ?? aUp) - aUp)), 0.06 + 0.32 * raise);
       let axis = new V().crossVectors(dirUp, FORWARD);
       if (axis.lengthSq() < 1e-6) axis = new V(1, 0, 0);
       axis.normalize();
