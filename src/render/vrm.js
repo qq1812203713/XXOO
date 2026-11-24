@@ -447,6 +447,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 这里从模型自己量出这条线（不写死），摆完姿势再把前臂拧过去。
   const PALM_LINE = Object.create(null); // 侧 -> 前臂骨局部坐标下的单位向量
   const FINGER_SIGN = Object.create(null); // 侧 -> 手指往掌心弯的旋转方向
+  // 每根手指自己的屈曲轴（手骨局部坐标）。手指不是在同一根轴上一起转的 ——
+  // 一根轴转全部，它们会像扇子一样摊平；所以逐指算。
+  const FINGER_AXIS = Object.create(null);
   const BODY_FWD = new V(0, 0, -1).applyQuaternion(holder.quaternion).normalize();
   try {
     for (const sd of ['left', 'right']) {
@@ -465,6 +468,19 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         const fWorld = mid.dir.clone();
         const p = new V().crossVectors(kWorld, fWorld);
         FINGER_SIGN[sd] = p.dot(medial) >= 0 ? 1 : -1;
+      }
+    }
+    for (const sd of ['left', 'right']) {
+      FINGER_AXIS[sd] = Object.create(null);
+      for (const f of ['Thumb', 'Index', 'Middle', 'Ring', 'Little']) {
+        const a = rest[`${sd}${f}Proximal`];
+        const b = rest[`${sd}${f}Intermediate`];
+        if (!a || !b) continue;
+        // 静止时这两节的夹角：叉积方向 = 继续弯下去该绕的轴
+        const c = new V().crossVectors(a.dir, b.dir);
+        if (c.lengthSq() < 1e-6) continue;
+        const inv = rest[`${sd}Hand`].q.clone().invert();
+        FINGER_AXIS[sd][f] = c.normalize().applyQuaternion(inv).normalize();
       }
     }
   } catch {
@@ -1247,22 +1263,26 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     Little: [0.55, 0.85, 0.5],
   };
   function poseFingers(bs, curl) {
-    if (!curl) return;
-    const dh = handDelta(`${bs}Hand`);
-    // 屈曲轴用模型自己手骨的 Z 轴（VRoid 的指根连线就落在这一轴上），
-    // 并且跟着手腕一起转。别换成世界轴 —— 手腕一拧，手指就会摊成扇子。
-    const axis = Z_AXIS.clone().applyQuaternion(dh);
-    const handDir = rest[`${bs}Hand`]?.dir;
-    const sign = -(handDir && handDir.x < 0 ? -1 : 1); // 手心那一侧
+    const hq = wq.get(`${bs}Hand`);
+    const d = handDelta(`${bs}Hand`);
+    if (!hq) return;
+    // 静止时手指就是弯的：MCP 18°、PIP 23°、DIP 10°（手休息位，康复教材的常规值）。
+    // curl 再往上加，加到 1 就是握拳（~70°/85°/35°）。
+    const REST_FLEX = [0.31, 0.4, 0.17];
+    const GRIP_FLEX = [0.85, 1.05, 0.45];
+    const axes = FINGER_AXIS[bs] || {};
     for (const f of Object.keys(FINGER_WEIGHT)) {
       const w = FINGER_WEIGHT[f];
+      const local = axes[f];
+      if (!local) continue;
+      const axis = local.clone().applyQuaternion(hq).normalize();
       let acc = 0;
       for (let i = 0; i < 3; i++) {
         const n = `${bs}${f}${FINGER_SEGS[i]}`;
         const r = rest[n];
         if (!r || !node(n)) continue;
-        acc += w[i] * curl;
-        aim(n, rotateAround(r.dir.clone().applyQuaternion(dh), axis, sign * acc));
+        acc += REST_FLEX[i] + clamp(curl, 0, 1) * GRIP_FLEX[i] * (w[i] * 1.25);
+        aim(n, rotateAround(r.dir.clone().applyQuaternion(d), axis, acc));
       }
     }
   }
@@ -1300,7 +1320,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
   const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
   const REST_CURL = 0.15; // 自然放松的手：指节微屈，不是笔直张开
-  function poseArm(bs, dirRaw, elbow = 0.16, hand = 0.08, curl = REST_CURL) {
+  // 手腕静止时是「略背伸」（10–15°），不是垂着屈 —— 这是手看起来活的关键之一
+  function poseArm(bs, dirRaw, elbow = 0.16, hand = -0.15, curl = REST_CURL) {
     const dir = (dirRaw || ARM_HANG[bs === 'right' ? 'L' : 'R']).clone().normalize();
     const raise = clamp(1 + dir.y, 0, 1);
     const sRest = rest[`${bs}Shoulder`]?.dir;
