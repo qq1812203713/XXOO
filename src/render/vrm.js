@@ -440,6 +440,33 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (rest[name]) restWorldQ.set(name, rest[name].q.clone());
   }
 
+  // ————————————————— 胯有多宽 —————————————————
+  // 手垂下去如果落在胯的轮廓里，从任何角度看都是「手插进身体」。
+  // 每具模型胯宽差很多，所以载入时量一次（只量躯干网格），手位就按它来定。
+  let HIP_HALF = 0.15;
+  try {
+    const hp = rest.hips;
+    if (hp) {
+      const p = new THREE.Vector3();
+      let w = 0;
+      scene.traverse((o) => {
+        if (!o.isMesh || !o.geometry?.attributes?.position) return;
+        const nm = (o.name || '').toLowerCase();
+        if (/hair|eye|face|headphone|ear|brow|teeth|tongue/.test(nm)) return;
+        const pos = o.geometry.attributes.position;
+        const step = Math.max(1, Math.floor(pos.count / 16000));
+        for (let i = 0; i < pos.count; i += step) {
+          p.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+          if (Math.abs(p.y - (hp.pos.y - 0.02)) > 0.06) continue;
+          w = Math.max(w, Math.abs(p.x - hp.pos.x));
+        }
+      });
+      if (w > 0.08) HIP_HALF = w;
+    }
+  } catch {
+    /* 量不出来就用默认值 */
+  }
+
   // ————————————————— 掌心的横轴 —————————————————
   // aim() 只管骨头的「方向」，不管绕骨头轴的「拧」。手臂从 T 字横举放下来时，
   // 是「最小旋转」把骨头带过去的 —— 掌心于是朝后、朝外，看起来就是手腕拧断了。
@@ -1318,7 +1345,23 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   }
 
   // 一条胳膊：肩 → 上臂 → 肘 → 手 → 手指
-  const ARM_HANG = { L: new V(0.24, -0.95, 0.06), R: new V(-0.24, -0.95, 0.06) };
+  // 手要落在「胯外侧 4cm、胯骨下方一掌、略往前」那个点上 —— 真人自然站立就是这样。
+  // 方向由 肩 → 那个点 反算，所以每具模型的胯宽、肩宽不同也各自成立。
+  const ARM_HANG = (() => {
+    const mk = (bs, sign) => {
+      const sh = rest[`${bs}UpperArm`];
+      const hand = rest[`${bs}Hand`];
+      if (!sh) return new V(sign * 0.24, -0.95, 0.06).normalize();
+      const armLen = hand ? Math.max(0.3, sh.pos.distanceTo(hand.pos)) : 0.45;
+      const hipsY = rest.hips?.pos.y ?? sh.pos.y - 0.32;
+      const hipsX = rest.hips?.pos.x ?? 0;
+      const targetX = hipsX + sign * (HIP_HALF + 0.045);
+      const targetY = hipsY - armLen * 0.26;
+      const targetZ = sh.pos.z + (FRONT * 0.05);
+      return new V(targetX - sh.pos.x, targetY - sh.pos.y, targetZ - sh.pos.z).normalize();
+    };
+    return { L: mk('right', +1), R: mk('left', -1) };
+  })();
   const REST_CURL = 0.15; // 自然放松的手：指节微屈，不是笔直张开
   // 手腕静止时是「略背伸」（10–15°），不是垂着屈 —— 这是手看起来活的关键之一
   function poseArm(bs, dirRaw, elbow = 0.16, hand = -0.15, curl = REST_CURL) {
@@ -1983,6 +2026,20 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       };
       return {
         springOn,
+        // 自检：两只手相对胯骨的位置（米）。x 太小就是胳膊往身体里收了
+        hands: (() => {
+          const out = {};
+          const hp = new V();
+          node('hips')?.getWorldPosition(hp);
+          for (const sd of ['left', 'right']) {
+            const h = node(`${sd}Hand`);
+            if (!h) continue;
+            const p = new V();
+            h.getWorldPosition(p);
+            out[sd[0]] = [p.x - hp.x, p.y - hp.y, p.z - hp.z].map((v) => +v.toFixed(3));
+          }
+          return out;
+        })(),
         stance: +STANCE.toFixed(3),
         legScale: +LEG_SCALE.toFixed(2),
         legs: (() => {
