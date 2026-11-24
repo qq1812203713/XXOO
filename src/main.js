@@ -15,7 +15,7 @@ import { createRenderer } from './render/renderer.js';
 import { createUI } from './ui/ui.js';
 import { hasWebGL } from './render/gl.js';
 import { createAnimeBody } from './render/live2d.js';
-import { create3DBody } from './render/vrm.js';
+import { create3DBody, MODELS, MODEL_ORDER, OUTFITS } from './render/vrm.js';
 
 // 把浏览器里的错误回传到服务器日志：我看日志就等于看控制台
 let reported = 0;
@@ -163,7 +163,220 @@ function markAwake(label) {
   if (d && window.__booted) d.textContent = `已醒来 · ${label} · 点任意处进去`;
 }
 
+// ————— 换建模 / 表情 / 自己的模型 —————
+// 之前换不了，是因为地址栏里的 ?model= 每次都会盖掉刚存下的选择：
+// 选完 → 存 localStorage → 刷新 → currentModelKey 先读 URL，又被按回原来那具。
+// 现在选完连地址栏一起改，URL 不再是“钉死”的。
+const HIDE_KEY = 'xxoo.hide';
+const MOOD_KEY = 'xxoo.mood';
+
+function setUrlModel(modelKey, hide) {
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('model', modelKey);
+    if (hide) u.searchParams.set('hide', hide);
+    else u.searchParams.delete('hide');
+    history.replaceState(null, '', u);
+  } catch {
+    /* 没 history 就算了 */
+  }
+}
+
+function buildModelSelect(onPick) {
+  const modelSel = document.getElementById('model');
+  if (!modelSel) return;
+  const opts = [];
+  for (const k of MODEL_ORDER) {
+    opts.push(`<option value="${k}">${MODELS[k]?.cn || k}</option>`);
+    for (const o of OUTFITS[k] || []) {
+      opts.push(`<option value="${k}|${o.id}">${MODELS[k]?.cn || k} · ${o.cn}</option>`);
+    }
+  }
+  opts.push('<option value="__upload">＋ 载入本地 .vrm…</option>');
+  modelSel.innerHTML = opts.join('');
+  let hideNow = '';
+  try {
+    hideNow = globalThis.localStorage?.getItem(HIDE_KEY) || '';
+  } catch {
+    /* ignore */
+  }
+  const light = (OUTFITS[modelKey] || []).find((o) => o.hide === hideNow);
+  modelSel.value = light ? `${modelKey}|${light.id}` : modelKey;
+  const opt = modelSel.querySelector(`option[value="${modelKey}"]`);
+  modelSel.title = opt ? MODEL_SELECT_TITLE(modelKey) : '换一具身体';
+  modelSel.addEventListener('change', () => onPick(modelSel));
+}
+
+function pickModel(modelSel) {
+  const raw = String(modelSel.value);
+  if (raw === '__upload') {
+    pickLocalVRM();
+    return;
+  }
+  const [next, outfitId] = raw.split('|');
+  const outfit = (OUTFITS[next] || []).find((o) => o.id === outfitId);
+  try {
+    globalThis.localStorage?.setItem(MODEL_KEY, next);
+    globalThis.localStorage?.setItem(HIDE_KEY, outfit?.hide || '');
+  } catch {
+    /* ignore */
+  }
+  setUrlModel(next, outfit?.hide || '');
+  hudNote(`换身体 · ${MODELS[next]?.cn || next}${outfit ? ' · ' + outfit.cn : ''}（重新加载中）`);
+  setTimeout(() => location.reload(), 300);
+}
+
+// —— 表情：VRM 的脸没有肌肉，只有一组预先做好的「表情权重」（blendShape）。
+// 所以这里给的是几个调好的组合，不是靠捏脸。选「交给情绪」她就自己变。
+const EXPR_PRESETS = {
+  auto: '交给情绪',
+  calm: '自然',
+  happy: '开心',
+  shy: '害羞',
+  love: '心动',
+  curious: '好奇',
+  surprised: '惊讶',
+  sad: '难过',
+  sleepy: '困',
+  pout: '生气',
+};
+let moodPinned = null;
+function buildExprSelect() {
+  const sel = document.getElementById('expr');
+  if (!sel) return;
+  sel.innerHTML = Object.entries(EXPR_PRESETS)
+    .map(([k, cn]) => `<option value="${k}">${cn}</option>`)
+    .join('');
+  let saved = 'auto';
+  try {
+    saved = globalThis.localStorage?.getItem(MOOD_KEY) || 'auto';
+  } catch {
+    /* ignore */
+  }
+  if (!EXPR_PRESETS[saved]) saved = 'auto';
+  sel.value = saved;
+  moodPinned = saved === 'auto' ? null : saved;
+  applyMoodPin();
+  sel.addEventListener('change', () => {
+    const v = sel.value;
+    moodPinned = v === 'auto' ? null : v;
+    try {
+      globalThis.localStorage?.setItem(MOOD_KEY, v);
+    } catch {
+      /* ignore */
+    }
+    applyMoodPin();
+    hudNote(`表情 · ${EXPR_PRESETS[v] || v}`);
+  });
+}
+function applyMoodPin() {
+  try {
+    body3d?.setMoodOverride?.(moodPinned);
+  } catch {
+    /* 3D 还没起来 */
+  }
+}
+
+// —— 自己的模型：拖一个 .vrm 进来就装进下拉（存在 IndexedDB，刷新还在） ——
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = globalThis.indexedDB?.open('xxoo-vrm', 1);
+    if (!r) return rej(new Error('no idb'));
+    r.onupgradeneeded = () => {
+      try {
+        r.result.createObjectStore('files');
+      } catch {
+        /* 已存在 */
+      }
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbPut(key, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('files', 'readwrite');
+    tx.objectStore('files').put(val, key);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('files', 'readonly');
+    const q = tx.objectStore('files').get(key);
+    q.onsuccess = () => res(q.result || null);
+    q.onerror = () => rej(q.error);
+  });
+}
+async function loadUserVRM() {
+  try {
+    const rec = await idbGet('mine');
+    if (!rec || !rec.buf) return null;
+    const url = URL.createObjectURL(new Blob([rec.buf], { type: 'model/gltf-binary' }));
+    MODELS.mine = { url, cn: rec.name || '我的建模', note: '你自己载入的' };
+    if (!MODEL_ORDER.includes('mine')) MODEL_ORDER.push('mine');
+    return 'mine';
+  } catch {
+    return null;
+  }
+}
+function pickLocalVRM() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.vrm,.glb';
+  inp.style.display = 'none';
+  inp.onchange = async () => {
+    const f = inp.files?.[0];
+    if (!f) return;
+    hudNote(`读入 ${f.name}（${(f.size / 1048576).toFixed(1)}MB）…`);
+    try {
+      const buf = await f.arrayBuffer();
+      await idbPut('mine', { name: f.name.replace(/\.vrm$/i, ''), buf });
+      try {
+        globalThis.localStorage?.setItem(MODEL_KEY, 'mine');
+        globalThis.localStorage?.setItem(HIDE_KEY, '');
+      } catch {
+        /* ignore */
+      }
+      setUrlModel('mine', '');
+      hudNote('装好了，正在换上…');
+      setTimeout(() => location.reload(), 400);
+    } catch (err) {
+      hudNote(`没装上：${err && err.message}`);
+    }
+  };
+  document.body.appendChild(inp);
+  inp.click();
+}
+
 let last3DFail = '';
+
+// ————— 换建模 —————
+// 都是 VRM 标准骨架，动作/手指/表情那一整套直接通用，换的只是“皮”。
+const MODEL_KEY = 'xxoo.model';
+function currentModelKey() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const f = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
+    // 自检用的 __XXOO_FLAGS__ 优先：地址栏里那一条可能是上一次拉近景时
+    // history.replaceState 留下的旧 model=，会盖掉这次要测的建模。
+    const asked = f.get('model') || q.get('model');
+    if (asked && MODELS[asked]) {
+      globalThis.localStorage?.setItem(MODEL_KEY, asked);
+      return asked;
+    }
+    const saved = globalThis.localStorage?.getItem(MODEL_KEY);
+    if (saved && MODELS[saved]) return saved;
+  } catch {
+    /* 隐私模式 */
+  }
+  return 'alicia';
+}
+let modelKey = currentModelKey();
+const MODEL_SELECT_TITLE = (k) => `${MODELS[k]?.cn || k} · ${MODELS[k]?.note || ''}`;
 
 function showBodyHint() {
   const el = document.getElementById('bodyhint');
@@ -182,14 +395,32 @@ function showBodyHint() {
 async function tryBoot3D() {
   if (body3d) return true;
   try {
-    const body = await create3DBody({
-      canvas: girl3dCanvas,
-      modelUrl: './vendor/model/alicia/AliciaSolid.vrm',
-      onStatus: (msg) => {
-        const el = document.getElementById('ver');
-        if (el) el.dataset.status = msg;
-      },
-    });
+    const boot = (key) =>
+      create3DBody({
+        canvas: girl3dCanvas,
+        modelUrl: MODELS[key].url,
+        onStatus: (msg) => {
+          const el = document.getElementById('ver');
+          if (el) el.dataset.status = msg;
+        },
+      });
+    let body = null;
+    try {
+      body = await boot(modelKey);
+    } catch (err) {
+      // 存档里那具身体已经不在 vendor/ 了（比如换过名单）—— 别让她掉回 2D，换成默认那具重来
+      if (modelKey !== 'alicia') {
+        reportToServer(`建模 ${modelKey} 加载失败，换回默认：${err && err.message}`, 'model');
+        try {
+          globalThis.localStorage?.setItem(MODEL_KEY, 'alicia');
+        } catch {
+          /* ignore */
+        }
+        body = await boot('alicia');
+      } else {
+        throw err;
+      }
+    }
     if (!body) {
       // 这里以前是静默失败 —— 直接掉回 2D，谁也不知道为什么
       last3DFail = `hasWebGL=${hasWebGL() ? 'yes' : 'no'}`;
@@ -198,6 +429,12 @@ async function tryBoot3D() {
       return false;
     }
     body3d = body;
+    document.getElementById('faceview')?.addEventListener('click', () => {
+      if (!body3d) return;
+      const on = body3d.setFaceView(!body3d.faceView);
+      document.getElementById('faceview')?.classList.toggle('on', !!on);
+      hudNote(on ? '推近 · 看她的脸' : '退回全身');
+    });
     document.getElementById('flip')?.addEventListener('click', () => {
       const deg = body3d?.turnBody?.(180);
       hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
@@ -207,18 +444,51 @@ async function tryBoot3D() {
     girl3dCanvas?.classList.add('on');
     last3DFail = '';
     showBodyHint();
+    // ?face=1（或写在 .flags 里）：一进来就是看脸模式，方便我自己核对细节
+    try {
+      const f = new URLSearchParams([location.search.replace(/^\?/, ''), globalThis.__XXOO_FLAGS__ || ''].filter(Boolean).join('&'));
+      const act = f.get('act');
+      if (act) {
+        body3d.play(act);
+        const at = f.get('at');
+        if (at != null) body3d.freezeAt(act, parseFloat(at) || 0); // 自检：钉在某一帧
+        else setInterval(() => body3d?.play(act), 4200); // 自检：一直重播，方便我抓帧
+      }
+      const mood = f.get('mood');
+      if (mood) body3d.setMoodOverride(mood);
+      const faceFlag = f.get('face');
+      if (faceFlag === '1' || faceFlag === '0') {
+        const want = faceFlag === '1';
+        body3d.setFaceView(want);
+        document.getElementById('faceview')?.classList.toggle('on', want);
+        setInterval(() => body3d?.setFaceView(want), 4000); // 自检：钉住看脸/全身
+      }
+    } catch {
+      /* ignore */
+    }
+    setTimeout(resizeAll, 150); // 3D 起来之后按真实可用高度重排一次（输入框会占掉底部）
     markAwake('3D 身体（VRM）');
+    applyMoodPin();
     setTimeout(startSnapshots, 900);
     setTimeout(() => {
       try {
-        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+        const st = body3d?.debugState?.() ?? {};
+        st.llm = { on: cortex.shouldUseLLM(), busy: cortex.busy, err: cortex.lastError, cfg: { base: cortex.cfg.baseUrl, model: cortex.cfg.model } };
+        st.goal = brain?.state?.goal?.type || 'idle';
+        st.bodyWish = brain?.state?.bodyWish?.clip || null;
+        reportToServer(JSON.stringify(st), 'state');
       } catch (err) {
         reportToServer(`state failed: ${err}`, 'state');
       }
     }, 2500);
     setInterval(() => {
       try {
-        reportToServer(JSON.stringify(body3d?.debugState?.() ?? {}), 'state');
+        const st = body3d?.debugState?.() ?? {};
+        st.llm = { on: cortex.shouldUseLLM(), busy: cortex.busy, err: cortex.lastError, base: cortex.cfg.baseUrl, model: cortex.cfg.model, keyLen: (cortex.cfg.key || '').length };
+        st.goal = brain?.state?.goal?.type || 'idle';
+        st.bodyWish = brain?.state?.bodyWish?.clip || null;
+        st.mood = brain?.state?.mood || '';
+        reportToServer(JSON.stringify(st), 'state');
       } catch {
         /* ignore */
       }
@@ -236,6 +506,12 @@ async function tryBoot3D() {
 }
 
 async function bootBody() {
+  // 先看看有没有用户自己载入的 .vrm（存在 IndexedDB 里），有就并进名单
+  const mine = await loadUserVRM();
+  modelKey = currentModelKey();
+  buildModelSelect(pickModel);
+  buildExprSelect();
+  if (mine && modelKey === 'mine') hudNote('用你自己的建模');
   if (bodyMode !== '2d' && bodyMode !== 'live2d') {
     if (await tryBoot3D()) return;
   }

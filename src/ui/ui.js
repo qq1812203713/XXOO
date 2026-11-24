@@ -236,6 +236,14 @@ export function createUI({ rig, brain, drives, world, memory, motors, cortex, re
   function enterWorld() {
     refs.intro.hidden = true;
     refs.intro.style.display = 'none';
+    // 进去之后画面可用高度变了（底部是输入框）—— 让她重新排一次镜头，脚别被挡住
+    setTimeout(() => {
+      try {
+        globalThis.dispatchEvent?.(new Event('resize'));
+      } catch {
+        /* 测试环境里没有 window */
+      }
+    }, 60);
     try {
       localStorage.setItem('xxoo.intro', '1');
     } catch {

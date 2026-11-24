@@ -34,6 +34,44 @@ function defaultIntent() {
   };
 }
 
+// 模型的口令 → 身体能演的动作
+// 你随口一句「弯个腰」「挥挥手」，不必等大模型 —— 本地就听得懂。
+// 顺序有讲究：越具体的越靠前。
+const BODY_WORDS = [
+  [/弯腰|鞠躬|鞠个躬|弯下|弯一下|低头/, 'bow'],
+  [/点头|点点头|嗯嗯/, 'nod'],
+  [/摇头|摇摇头|不干|拒绝/, 'shake'],
+  [/挥手|招手|打招呼|拜拜|再见|hello|hi|hey/i, 'wave'],
+  [/伸懒腰|伸个懒腰|伸展|举手|把手举/, 'stretch'],
+  [/握(拳|手|一下)|抓一下|攥/, 'grip'],
+  [/走过来|过来|靠近|走两步|走一下|走/, 'walk'],
+  [/转(个)?身|转一圈|转个圈|回头/, 'turn_left'],
+  [/伸出?(左|右)?手|伸手/, 'reachR'],
+];
+
+const BODY_CLIP = {
+  bow: 'bow',
+  nod: 'nod',
+  shake: 'shake',
+  wave: 'wave',
+  walk: 'walk',
+  turn_left: 'turnL',
+  turn_right: 'turnR',
+  look_left: 'lookL',
+  look_right: 'lookR',
+  reach_left: 'reachL',
+  reach_right: 'reachR',
+  grip: 'grip',
+  stretch: 'stretch',
+  rest: 'idle',
+};
+const BODY_CN = {
+  bow: '弯个腰', nod: '点点头', shake: '摇摇头', wave: '挥挥手',
+  walk: '走两步', turn_left: '往左转', turn_right: '往右转',
+  look_left: '往左看', look_right: '往右看', reach_left: '伸出左手',
+  reach_right: '伸出右手', grip: '握一下手', stretch: '伸个懒腰', rest: '停下来',
+};
+
 export function createBrain({ rig, servos, motors, drives, memory, world, spinal, cortex, log, goals }) {
   const g = goals || createGoals({ log });
 
@@ -56,6 +94,9 @@ export function createBrain({ rig, servos, motors, drives, memory, world, spinal
     fidget: null,
     nextFidget: 4,
     nextThink: 6,
+    // 大模型点名的身体动作（只说 clip，关节依旧归身体自己）
+    bodyWish: null,
+    wishSeq: 0,
     talking: 0,
     lastVoiceAt: 0,
     speechSeq: 0,
@@ -348,16 +389,21 @@ export function createBrain({ rig, servos, motors, drives, memory, world, spinal
     };
   }
 
-  async function requestLLM(extra = {}) {
+  async function requestLLM(extra = {}, opts = {}) {
     if (!cortex.shouldUseLLM()) return null;
     const seq = ++state.thinkSeq;
     const res = await cortex.askLLM(buildPayload(extra));
     if (!res || seq !== state.thinkSeq) return null;
     setMood(res.mood || 'calm', 5);
     state.thought = res.thought || '';
-    say(res.say);
+    if (!opts.silent) say(res.say);
     if (res.intent && res.intent !== 'idle' && state.goal?.type === 'idle') {
       startGoal(['create', 'wander', 'approach', 'observe', 'rest'].includes(res.intent) ? res.intent : 'idle');
+    }
+    // 身体：模型说「抬一下手」，身体就真的抬手 —— 但只需照做，不需要知道关节怎么算
+    if (res.body && res.body !== 'none' && BODY_CLIP[res.body]) {
+      state.bodyWish = { clip: BODY_CLIP[res.body], id: ++state.wishSeq, label: res.body, at: Date.now() };
+      log.push({ layer: 'cortex', motor: 'body', text: `大模型：让身体「${BODY_CN[res.body]}」` });
     }
     return res;
   }
@@ -514,6 +560,13 @@ export function createBrain({ rig, servos, motors, drives, memory, world, spinal
     const likeMatch = String(text).match(/我(喜欢|讨厌|爱|害怕)(.{1,12})/);
     if (likeMatch) memory.fact(likeMatch[1], likeMatch[2], 0.65);
 
+    // 先把「他要我做的动作」接住：这一条不走网络，所以一定会执行
+    const cmd = BODY_WORDS.find(([re]) => re.test(String(text)));
+    if (cmd) {
+      state.bodyWish = { clip: BODY_CLIP[cmd[1]], id: ++state.wishSeq, label: cmd[1], at: Date.now() };
+      log.push({ layer: 'cortex', motor: 'body', text: `他说「${text}」→ 身体：${BODY_CN[cmd[1]] || cmd[1]}` });
+    }
+
     const local = cortex.localReply(text, { drives: drives.v });
     setMood('curious', 2);
 
@@ -524,10 +577,18 @@ export function createBrain({ rig, servos, motors, drives, memory, world, spinal
       return local;
     }
 
-    const res = await requestLLM({ userText: text });
-    if (res) return res;
+    // 远端模型可能要几十秒才回 —— 不能让她干等着不说话。
+    // 1.8 秒内没回，就先用本地心智回一句；模型回来了照样接管情绪和动作。
+    const pending = requestLLM({ userText: text }, { silent: true });
+    const quick = await Promise.race([pending, wait(1800).then(() => null)]);
+    if (quick) {
+      setMood(quick.mood || 'calm', 5);
+      say(quick.say);
+      return quick;
+    }
     setMood(local.mood, 5);
     say(local.say);
+    pending.catch(() => {});
     return local;
   }
 
