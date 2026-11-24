@@ -163,6 +163,195 @@ function markAwake(label) {
   if (d && window.__booted) d.textContent = `已醒来 · ${label} · 点任意处进去`;
 }
 
+// ————— 换建模 / 表情 / 自己的模型 —————
+// 之前换不了，是因为地址栏里的 ?model= 每次都会盖掉刚存下的选择：
+// 选完 → 存 localStorage → 刷新 → currentModelKey 先读 URL，又被按回原来那具。
+// 现在选完连地址栏一起改，URL 不再是“钉死”的。
+const HIDE_KEY = 'xxoo.hide';
+const MOOD_KEY = 'xxoo.mood';
+
+function setUrlModel(modelKey, hide) {
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('model', modelKey);
+    if (hide) u.searchParams.set('hide', hide);
+    else u.searchParams.delete('hide');
+    history.replaceState(null, '', u);
+  } catch {
+    /* 没 history 就算了 */
+  }
+}
+
+function buildModelSelect(onPick) {
+  const modelSel = document.getElementById('model');
+  if (!modelSel) return;
+  const opts = [];
+  for (const k of MODEL_ORDER) {
+    opts.push(`<option value="${k}">${MODELS[k]?.cn || k}</option>`);
+    for (const o of OUTFITS[k] || []) {
+      opts.push(`<option value="${k}|${o.id}">${MODELS[k]?.cn || k} · ${o.cn}</option>`);
+    }
+  }
+  opts.push('<option value="__upload">＋ 载入本地 .vrm…</option>');
+  modelSel.innerHTML = opts.join('');
+  let hideNow = '';
+  try {
+    hideNow = globalThis.localStorage?.getItem(HIDE_KEY) || '';
+  } catch {
+    /* ignore */
+  }
+  const light = (OUTFITS[modelKey] || []).find((o) => o.hide === hideNow);
+  modelSel.value = light ? `${modelKey}|${light.id}` : modelKey;
+  const opt = modelSel.querySelector(`option[value="${modelKey}"]`);
+  modelSel.title = opt ? MODEL_SELECT_TITLE(modelKey) : '换一具身体';
+  modelSel.addEventListener('change', () => onPick(modelSel));
+}
+
+function pickModel(modelSel) {
+  const raw = String(modelSel.value);
+  if (raw === '__upload') {
+    pickLocalVRM();
+    return;
+  }
+  const [next, outfitId] = raw.split('|');
+  const outfit = (OUTFITS[next] || []).find((o) => o.id === outfitId);
+  try {
+    globalThis.localStorage?.setItem(MODEL_KEY, next);
+    globalThis.localStorage?.setItem(HIDE_KEY, outfit?.hide || '');
+  } catch {
+    /* ignore */
+  }
+  setUrlModel(next, outfit?.hide || '');
+  hudNote(`换身体 · ${MODELS[next]?.cn || next}${outfit ? ' · ' + outfit.cn : ''}（重新加载中）`);
+  setTimeout(() => location.reload(), 300);
+}
+
+// —— 表情：VRM 的脸没有肌肉，只有一组预先做好的「表情权重」（blendShape）。
+// 所以这里给的是几个调好的组合，不是靠捏脸。选「交给情绪」她就自己变。
+const EXPR_PRESETS = {
+  auto: '交给情绪',
+  calm: '自然',
+  happy: '开心',
+  shy: '害羞',
+  love: '心动',
+  curious: '好奇',
+  surprised: '惊讶',
+  sad: '难过',
+  sleepy: '困',
+  pout: '生气',
+};
+let moodPinned = null;
+function buildExprSelect() {
+  const sel = document.getElementById('expr');
+  if (!sel) return;
+  sel.innerHTML = Object.entries(EXPR_PRESETS)
+    .map(([k, cn]) => `<option value="${k}">${cn}</option>`)
+    .join('');
+  let saved = 'auto';
+  try {
+    saved = globalThis.localStorage?.getItem(MOOD_KEY) || 'auto';
+  } catch {
+    /* ignore */
+  }
+  if (!EXPR_PRESETS[saved]) saved = 'auto';
+  sel.value = saved;
+  moodPinned = saved === 'auto' ? null : saved;
+  applyMoodPin();
+  sel.addEventListener('change', () => {
+    const v = sel.value;
+    moodPinned = v === 'auto' ? null : v;
+    try {
+      globalThis.localStorage?.setItem(MOOD_KEY, v);
+    } catch {
+      /* ignore */
+    }
+    applyMoodPin();
+    hudNote(`表情 · ${EXPR_PRESETS[v] || v}`);
+  });
+}
+function applyMoodPin() {
+  try {
+    body3d?.setMoodOverride?.(moodPinned);
+  } catch {
+    /* 3D 还没起来 */
+  }
+}
+
+// —— 自己的模型：拖一个 .vrm 进来就装进下拉（存在 IndexedDB，刷新还在） ——
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = globalThis.indexedDB?.open('xxoo-vrm', 1);
+    if (!r) return rej(new Error('no idb'));
+    r.onupgradeneeded = () => {
+      try {
+        r.result.createObjectStore('files');
+      } catch {
+        /* 已存在 */
+      }
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbPut(key, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('files', 'readwrite');
+    tx.objectStore('files').put(val, key);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('files', 'readonly');
+    const q = tx.objectStore('files').get(key);
+    q.onsuccess = () => res(q.result || null);
+    q.onerror = () => rej(q.error);
+  });
+}
+async function loadUserVRM() {
+  try {
+    const rec = await idbGet('mine');
+    if (!rec || !rec.buf) return null;
+    const url = URL.createObjectURL(new Blob([rec.buf], { type: 'model/gltf-binary' }));
+    MODELS.mine = { url, cn: rec.name || '我的建模', note: '你自己载入的' };
+    if (!MODEL_ORDER.includes('mine')) MODEL_ORDER.push('mine');
+    return 'mine';
+  } catch {
+    return null;
+  }
+}
+function pickLocalVRM() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.vrm,.glb';
+  inp.style.display = 'none';
+  inp.onchange = async () => {
+    const f = inp.files?.[0];
+    if (!f) return;
+    hudNote(`读入 ${f.name}（${(f.size / 1048576).toFixed(1)}MB）…`);
+    try {
+      const buf = await f.arrayBuffer();
+      await idbPut('mine', { name: f.name.replace(/\.vrm$/i, ''), buf });
+      try {
+        globalThis.localStorage?.setItem(MODEL_KEY, 'mine');
+        globalThis.localStorage?.setItem(HIDE_KEY, '');
+      } catch {
+        /* ignore */
+      }
+      setUrlModel('mine', '');
+      hudNote('装好了，正在换上…');
+      setTimeout(() => location.reload(), 400);
+    } catch (err) {
+      hudNote(`没装上：${err && err.message}`);
+    }
+  };
+  document.body.appendChild(inp);
+  inp.click();
+}
+
 let last3DFail = '';
 
 // ————— 换建模 —————
@@ -184,7 +373,7 @@ function currentModelKey() {
   }
   return 'alicia';
 }
-const modelKey = currentModelKey();
+let modelKey = currentModelKey();
 const MODEL_SELECT_TITLE = (k) => `${MODELS[k]?.cn || k} · ${MODELS[k]?.note || ''}`;
 
 function showBodyHint() {
@@ -244,41 +433,6 @@ async function tryBoot3D() {
       document.getElementById('faceview')?.classList.toggle('on', !!on);
       hudNote(on ? '推近 · 看她的脸' : '退回全身');
     });
-    // 换身体：下拉选择，选中就换
-    const modelSel = document.getElementById('model');
-    if (modelSel) {
-      // 选项 = 每具建模 × 它的可选穿搭（只有能分层脱的才多一项）
-      const opts = [];
-      for (const k of MODEL_ORDER) {
-        opts.push(`<option value="${k}">${MODELS[k]?.cn || k}</option>`);
-        for (const o of OUTFITS[k] || []) {
-          opts.push(`<option value="${k}|${o.id}">${MODELS[k]?.cn || k} · ${o.cn}</option>`);
-        }
-      }
-      modelSel.innerHTML = opts.join('');
-      let hideNow = '';
-      try {
-        hideNow = globalThis.localStorage?.getItem('xxoo.hide') || '';
-      } catch {
-        /* ignore */
-      }
-      const light = (OUTFITS[modelKey] || []).find((o) => o.hide === hideNow);
-      modelSel.value = light ? `${modelKey}|${light.id}` : modelKey;
-      const opt = modelSel.querySelector(`option[value="${modelKey}"]`);
-      modelSel.title = opt ? MODEL_SELECT_TITLE(modelKey) : '换一具身体';
-      modelSel.addEventListener('change', () => {
-        const [next, outfitId] = String(modelSel.value).split('|');
-        const outfit = (OUTFITS[next] || []).find((o) => o.id === outfitId);
-        try {
-          globalThis.localStorage?.setItem(MODEL_KEY, next);
-          globalThis.localStorage?.setItem('xxoo.hide', outfit?.hide || '');
-        } catch {
-          /* ignore */
-        }
-        hudNote(`换身体 · ${MODELS[next]?.cn || next}${outfit ? ' · ' + outfit.cn : ''}（重新加载中）`);
-        setTimeout(() => location.reload(), 360);
-      });
-    }
     document.getElementById('flip')?.addEventListener('click', () => {
       const deg = body3d?.turnBody?.(180);
       hudNote(Number.isFinite(deg) ? `转身 → 朝 ${((deg * 180) / Math.PI).toFixed(0)}°` : '转身了');
@@ -312,6 +466,7 @@ async function tryBoot3D() {
     }
     setTimeout(resizeAll, 150); // 3D 起来之后按真实可用高度重排一次（输入框会占掉底部）
     markAwake('3D 身体（VRM）');
+    applyMoodPin();
     setTimeout(startSnapshots, 900);
     setTimeout(() => {
       try {
@@ -349,6 +504,12 @@ async function tryBoot3D() {
 }
 
 async function bootBody() {
+  // 先看看有没有用户自己载入的 .vrm（存在 IndexedDB 里），有就并进名单
+  const mine = await loadUserVRM();
+  modelKey = currentModelKey();
+  buildModelSelect(pickModel);
+  buildExprSelect();
+  if (mine && modelKey === 'mine') hudNote('用你自己的建模');
   if (bodyMode !== '2d' && bodyMode !== 'live2d') {
     if (await tryBoot3D()) return;
   }

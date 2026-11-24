@@ -689,13 +689,19 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const FACE_W = { joy: 0, sorrow: 0, fun: 0, angry: 0, neutral: 0 };
   const MOUTH_W = { a: 0, i: 0, u: 0, e: 0, o: 0 };
   // 权重不是越大越好：joy 拉到 0.9 这具模型的眼睛会直接眯成一条缝。
+  // VRM 的脸没有肌肉 —— 它只有一组烘好的「表情权重」（blendShape：happy/sad/angry/relaxed
+  // /blink + 五个口型）。真实感只能靠组合：眼型（blink 眯眼）+ 眉/嘴的权重 + 视线 + 头颈角度。
+  // 所以每个情绪是一整套，不是给一根“肌肉”。
   const EMO = {
-    calm: { joy: 0.16, neutral: 0.3 },
+    calm: { joy: 0.26, fun: 0.12, neutral: 0.22 },
     happy: { joy: 0.55, fun: 0.4 },
-    shy: { fun: 0.6, joy: 0.22 },
-    curious: { joy: 0.3, fun: 0.22 },
-    sleepy: { sorrow: 0.36, neutral: 0.34 },
-    sad: { sorrow: 0.7 },
+    shy: { fun: 0.55, joy: 0.3, squint: 0.3, gazeX: -0.35, gazeY: 0.22 },
+    love: { joy: 0.6, fun: 0.4, squint: 0.16, gazeX: 0.05, gazeY: -0.05 },
+    curious: { joy: 0.3, fun: 0.22, gazeX: 0.22, gazeY: -0.12 },
+    sleepy: { sorrow: 0.36, neutral: 0.34, squint: 0.4 },
+    sad: { sorrow: 0.7, squint: 0.12, gazeY: 0.3 },
+    pout: { angry: 0.3, sorrow: 0.22, squint: 0.1, gazeX: -0.2 },
+    surprised: { joy: 0.1, neutral: 0.55, squint: -0.0, gazeY: -0.15 },
     startled: { angry: 0.18, joy: 0.14 },
   };
   let moodOverride = null; // 自检用：?mood=happy
@@ -709,8 +715,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const h = 1 / 60;
     const d = clamp(step || h, 1 / 240, 0.1);
     const f = face?.state || {};
-    const gazeX = gx ?? clamp((f.gazeX ?? 0) / 3, -1, 1);
-    const gazeY = gy ?? clamp((f.gazeY ?? 0) / 3, -1, 1);
+    let gazeX = gx ?? clamp((f.gazeX ?? 0) / 3, -1, 1);
+    let gazeY = gy ?? clamp((f.gazeY ?? 0) / 3, -1, 1);
+    // 情绪自带的视线（害羞会瞟开、难过会垂下）——眼球在这一步之前就得定下来
+    {
+      const m0 = moodOverride || brain?.state?.mood || 'calm';
+      const t0 = EMO[m0] || EMO.calm;
+      if (Number.isFinite(t0.gazeX)) gazeX = gazeX * 0.5 + t0.gazeX * 0.5;
+      if (Number.isFinite(t0.gazeY)) gazeY = gazeY * 0.5 + t0.gazeY * 0.5;
+    }
 
     // 眼球：VRM 的 eye 骨，往他要看的方向转
     for (const side of ['left', 'right']) {
@@ -746,7 +759,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const auto = blinkLeft > 0 ? Math.sin((1 - blinkLeft / 0.14) * Math.PI) : 0;
       const eyeMid = clamp(1 - (f.eyeOpen ?? 1), 0, 1);
       const sleep = mood === 'sleepy' ? 0.45 : 0;
-      if (EXPR_NAME.blink) em.setValue(EXPR_NAME.blink, clamp(Math.max(auto, eyeMid, (f.blink ?? 0)) + sleep, 0, 1));
+      // 情绪自带的眼型（害羞/困/难过会微微眯）——这是“肌肉感”最便宜也最有效的一招
+      const squint = clamp(target.squint || 0, 0, 1);
+      if (EXPR_NAME.blink) {
+        em.setValue(EXPR_NAME.blink, clamp(Math.max(auto, eyeMid, f.blink ?? 0) + sleep + squint, 0, 1));
+      }
+
 
       // —— 说话：嘴形在 a/i/u/e/o 之间走，不是开合 ——
       const talking = (brain?.state?.talking || 0) > 0 ? 1 : 0;
@@ -1231,13 +1249,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   function poseFingers(bs, curl) {
     if (!curl) return;
     const dh = handDelta(`${bs}Hand`);
-    const hq = wq.get(`${bs}Hand`);
-    const kLocal = PALM_LINE[bs];
-    if (!hq || !kLocal) return; // 量不到掌心横轴就不乱动手指
-    // 手指的屈曲轴就是「指根连线」，而且它必须跟着手腕一起转。
-    // 以前这里写的是世界 Z 轴 —— 手腕一旦被拧正，手指就会朝侧面弯。
-    const axis = kLocal.clone().applyQuaternion(hq).normalize();
-    const sign = FINGER_SIGN[bs] || 1;
+    // 屈曲轴用模型自己手骨的 Z 轴（VRoid 的指根连线就落在这一轴上），
+    // 并且跟着手腕一起转。别换成世界轴 —— 手腕一拧，手指就会摊成扇子。
+    const axis = Z_AXIS.clone().applyQuaternion(dh);
+    const handDir = rest[`${bs}Hand`]?.dir;
+    const sign = -(handDir && handDir.x < 0 ? -1 : 1); // 手心那一侧
     for (const f of Object.keys(FINGER_WEIGHT)) {
       const w = FINGER_WEIGHT[f];
       let acc = 0;
@@ -1503,14 +1519,15 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     ]),
     reachL: safeClip('reachL', [
       { t: 0, fn: NEUTRAL },
-      { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: 0.25 }) },
-      { t: 1.5, fn: () => basePose({ armL: new V(0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: 0.3 }) },
+      // 伸手不是把胳膊平举：上臂垂到 45° 以下、肘弯着、掌朝下，才像「去够一个东西」。
+      { t: 0.6, fn: () => basePose({ armL: new V(0.3, -0.6, -0.74), elbow: 0.58, hand: 0.14, curl: 0.34, headPitch: 0.12, sway: 0.25 }) },
+      { t: 1.5, fn: () => basePose({ armL: new V(0.36, -0.52, -0.78), elbow: 0.7, hand: 0.16, curl: 0.12, headPitch: 0.14, sway: 0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
     reachR: safeClip('reachR', [
       { t: 0, fn: NEUTRAL },
-      { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.28, -0.9), elbow: 0.42, hand: 0.16, curl: 0.3, headPitch: 0.12, sway: -0.25 }) },
-      { t: 1.5, fn: () => basePose({ armR: new V(-0.34, -0.24, -0.9), elbow: 0.5, hand: 0.18, curl: 0.1, headPitch: 0.14, sway: -0.3 }) },
+      { t: 0.6, fn: () => basePose({ armR: new V(-0.3, -0.6, -0.74), elbow: 0.58, hand: 0.14, curl: 0.34, headPitch: 0.12, sway: -0.25 }) },
+      { t: 1.5, fn: () => basePose({ armR: new V(-0.36, -0.52, -0.78), elbow: 0.7, hand: 0.16, curl: 0.12, headPitch: 0.14, sway: -0.3 }) },
       { t: 2.3, fn: NEUTRAL },
     ]),
     // 这几个是「听得懂人话」的那部分：你让她弯腰、点头、摇头、挥手，她真的会做
