@@ -361,7 +361,9 @@ function currentModelKey() {
   try {
     const q = new URLSearchParams(location.search);
     const f = new URLSearchParams(globalThis.__XXOO_FLAGS__ || '');
-    const asked = q.get('model') || f.get('model');
+    // 自检用的 __XXOO_FLAGS__ 优先：地址栏里那一条可能是上一次拉近景时
+    // history.replaceState 留下的旧 model=，会盖掉这次要测的建模。
+    const asked = f.get('model') || q.get('model');
     if (asked && MODELS[asked]) {
       globalThis.localStorage?.setItem(MODEL_KEY, asked);
       return asked;
