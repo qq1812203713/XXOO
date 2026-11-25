@@ -1,13 +1,13 @@
 :root {
-  --bg: #07050c;
-  --ink: #f4e9f1;
-  --dim: rgba(244, 233, 241, 0.52);
-  --rose: #ff9fbe;
-  --rose-soft: rgba(255, 159, 190, 0.16);
-  --violet: #b9a6ff;
-  --mint: #9ef0e0;
-  --line: rgba(255, 200, 226, 0.14);
-  --glass: rgba(16, 10, 22, 0.72);
+  --bg: #d9efff;
+  --ink: #1b2c38;
+  --dim: rgba(27, 44, 56, 0.62);
+  --rose: #2ba88c;
+  --rose-soft: rgba(43, 168, 140, 0.14);
+  --violet: #4a8ee2;
+  --mint: #1d9e82;
+  --line: rgba(34, 84, 108, 0.14);
+  --glass: rgba(255, 255, 255, 0.78);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
@@ -37,7 +37,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
@@ -52,8 +53,8 @@ input {
   cursor: crosshair;
 }
 
-/* Live2D 的她：独立一层 WebGL 画布，透明叠在世界之上。
-   pointer-events: none —— 所有触摸仍旧由 #stage 接，逻辑一行都不用改。 */
+/* Live2D：独立一层 WebGL 画布，透明叠在世界之上。
+   pointer-events: none —— 所有触摸仍旧由 #stage 接。 */
 #girl {
   position: fixed;
   inset: 0;
@@ -70,7 +71,7 @@ input {
   opacity: 1;
 }
 
-/* 3D 身体（VRM）：同一层，透明，不吃事件 */
+/* 3D 身体（VRM / PMX）：同一层，透明，不吃事件 */
 #girl3d {
   position: fixed;
   inset: 0;
@@ -87,7 +88,7 @@ input {
   opacity: 1;
 }
 
-/* 3D 没起来时的一行小字：说清现在是哪一层在撑着她，点屏幕会重试。 */
+/* 3D 没起来时的一行小字 */
 #bodyhint {
   position: fixed;
   left: 14px;
@@ -97,7 +98,7 @@ input {
   font-size: 11px;
   line-height: 1.5;
   letter-spacing: 0.02em;
-  color: rgba(255, 208, 228, 0.4);
+  color: rgba(27, 44, 56, 0.56);
   pointer-events: none;
 }
 
@@ -131,19 +132,19 @@ input {
   height: 8px;
   border-radius: 50%;
   background: var(--rose);
-  box-shadow: 0 0 0 0 rgba(255, 159, 190, 0.55);
+  box-shadow: 0 0 0 0 rgba(43, 168, 140, 0.45);
   animation: pulse 3.4s ease-out infinite;
 }
 
 @keyframes pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(255, 159, 190, 0.5);
+    box-shadow: 0 0 0 0 rgba(43, 168, 140, 0.45);
   }
   60% {
-    box-shadow: 0 0 0 9px rgba(255, 159, 190, 0);
+    box-shadow: 0 0 0 9px rgba(43, 168, 140, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 159, 190, 0);
+    box-shadow: 0 0 0 0 rgba(43, 168, 140, 0);
   }
 }
 
@@ -172,7 +173,7 @@ input {
 
 .chip {
   border: 1px solid var(--line);
-  background: rgba(20, 12, 26, 0.55);
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(10px);
   color: var(--ink);
   font-size: 11.5px;
@@ -181,33 +182,34 @@ input {
   border-radius: 999px;
   cursor: pointer;
   transition: 0.18s ease;
+  box-shadow: 0 2px 10px rgba(32, 74, 96, 0.08);
 }
 
-/* 换身体：下拉框也用 chip 的样子，但要去掉 select 自带的箭头底色 */
+/* 下拉框也用 chip 样式 */
 select.chip {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 22px;
-  background-image: linear-gradient(45deg, transparent 50%, rgba(255, 217, 230, 0.8) 50%),
-    linear-gradient(135deg, rgba(255, 217, 230, 0.8) 50%, transparent 50%);
+  background-image: linear-gradient(45deg, transparent 50%, rgba(27, 44, 56, 0.72) 50%),
+    linear-gradient(135deg, rgba(27, 44, 56, 0.72) 50%, transparent 50%);
   background-position: calc(100% - 12px) 52%, calc(100% - 8px) 52%;
   background-size: 4px 4px, 4px 4px;
   background-repeat: no-repeat;
 }
 select.chip option {
-  background: #150d1c;
-  color: #ffeaf2;
+  background: #f5fbff;
+  color: #1b2c38;
 }
 
 .chip.on {
-  color: #1a0d18;
-  background: linear-gradient(120deg, #ffc3dd, #e6b6ff);
+  color: #ffffff;
+  background: linear-gradient(120deg, #28a68a, #4296e2);
   border-color: transparent;
 }
 
 .chip:hover {
-  border-color: rgba(255, 180, 210, 0.4);
-  background: rgba(38, 20, 44, 0.7);
+  border-color: rgba(43, 168, 140, 0.45);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .chip:active {
@@ -219,10 +221,16 @@ select.chip option {
   position: fixed;
   left: 14px;
   top: calc(74px + var(--safe-t));
-  width: 96px;
+  width: 108px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(32, 74, 96, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
   z-index: 4;
   pointer-events: none;
 }
@@ -242,9 +250,9 @@ select.chip option {
 }
 
 .drive .bar {
-  height: 2.5px;
+  height: 3px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(27, 44, 56, 0.1);
   overflow: hidden;
 }
 
@@ -253,7 +261,6 @@ select.chip option {
   width: 0%;
   border-radius: 2px;
   transition: width 0.5s linear;
-  box-shadow: 0 0 6px currentColor;
 }
 
 /* ————— 对话气泡 ————— */
@@ -263,15 +270,15 @@ select.chip option {
   max-width: min(268px, 74vw);
   padding: 10px 13px;
   border-radius: 15px 15px 15px 4px;
-  background: rgba(20, 11, 25, 0.82);
-  border: 1px solid rgba(255, 190, 216, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(43, 120, 140, 0.18);
   backdrop-filter: blur(14px);
   font-family: ui-serif, 'Songti SC', 'Noto Serif SC', Georgia, serif;
   font-size: 14px;
   line-height: 1.6;
   letter-spacing: 0.02em;
-  color: #ffeef5;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+  color: #1b2c38;
+  box-shadow: 0 10px 30px rgba(30, 74, 98, 0.14);
   transform: translate(-50%, -100%);
   animation: bubble-in 0.3s ease;
   pointer-events: none;
@@ -284,9 +291,9 @@ select.chip option {
   bottom: -5px;
   width: 8px;
   height: 8px;
-  background: rgba(20, 11, 25, 0.82);
-  border-right: 1px solid rgba(255, 190, 216, 0.22);
-  border-bottom: 1px solid rgba(255, 190, 216, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+  border-right: 1px solid rgba(43, 120, 140, 0.18);
+  border-bottom: 1px solid rgba(43, 120, 140, 0.18);
   transform: rotate(45deg);
 }
 
@@ -312,11 +319,11 @@ select.chip option {
   gap: 8px;
   padding: 6px 6px 6px 16px;
   border-radius: 999px;
-  background: rgba(18, 10, 24, 0.78);
+  background: rgba(255, 255, 255, 0.86);
   border: 1px solid var(--line);
   backdrop-filter: blur(16px);
   z-index: 7;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 34px rgba(32, 74, 96, 0.14);
 }
 
 .composer input {
@@ -330,14 +337,14 @@ select.chip option {
 }
 
 .composer input::placeholder {
-  color: rgba(244, 233, 241, 0.35);
+  color: rgba(27, 44, 56, 0.4);
 }
 
 .composer button {
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(135deg, #ff9fbe, #c79bff);
-  color: #200a17;
+  background: linear-gradient(135deg, #28a88b, #4599e4);
+  color: #ffffff;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.1em;
@@ -357,12 +364,13 @@ select.chip option {
   bottom: 0;
   width: min(330px, 92vw);
   padding: calc(16px + var(--safe-t)) 16px calc(18px + var(--safe-b));
-  background: linear-gradient(180deg, rgba(14, 8, 20, 0.94), rgba(10, 6, 15, 0.97));
+  background: linear-gradient(180deg, rgba(246, 251, 255, 0.96), rgba(235, 246, 252, 0.98));
   border-left: 1px solid var(--line);
   backdrop-filter: blur(22px);
   z-index: 9;
   overflow-y: auto;
   animation: slide-in 0.26s ease;
+  box-shadow: -8px 0 32px rgba(27, 64, 86, 0.1);
 }
 
 @keyframes slide-in {
@@ -385,7 +393,7 @@ select.chip option {
   font-size: 12px;
   letter-spacing: 0.3em;
   font-weight: 600;
-  color: #ffd4e4;
+  color: #19564e;
 }
 
 .dim {
@@ -421,7 +429,7 @@ select.chip option {
 .tabs button {
   flex: 1;
   border: 1px solid var(--line);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 8px;
   font-size: 10px;
   padding: 5px 0;
@@ -431,20 +439,21 @@ select.chip option {
 
 .tabs button.on {
   background: var(--rose-soft);
-  border-color: rgba(255, 159, 190, 0.45);
-  color: #ffe4ee;
+  border-color: rgba(43, 168, 140, 0.45);
+  color: #155c4e;
+  font-weight: 600;
 }
 
 #inspector {
   display: block;
   width: 100%;
-  max-width: 340px; /* 宽屏上也不要摊成一张巨幅骨架 */
+  max-width: 340px;
   margin: 0 auto;
   height: auto;
   aspect-ratio: 300 / 260;
   border-radius: 12px;
-  background: radial-gradient(circle at 50% 45%, rgba(60, 30, 70, 0.55), rgba(10, 6, 16, 0.9));
-  border: 1px solid rgba(255, 190, 216, 0.1);
+  background: radial-gradient(circle at 50% 45%, #1d3545, #10202b);
+  border: 1px solid rgba(34, 84, 108, 0.16);
 }
 
 #inspector-hint {
@@ -458,8 +467,8 @@ select.chip option {
   gap: 4px 10px;
   font-size: 9.5px;
   color: var(--dim);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(27, 44, 56, 0.08);
+  border-bottom: 1px solid rgba(27, 44, 56, 0.08);
   padding: 7px 0;
   margin-bottom: 6px;
 }
@@ -478,19 +487,19 @@ select.chip option {
 }
 
 .l-brain {
-  background: #ffd479;
+  background: #e09619;
 }
 .l-cere {
-  background: #8fb8ff;
+  background: #3d7ae6;
 }
 .l-motor {
-  background: #9ef0e0;
+  background: #179b80;
 }
 .l-reflex {
-  background: #ff7a9c;
+  background: #e44a72;
 }
 .l-face {
-  background: #c79bff;
+  background: #8d63e6;
 }
 
 .log {
@@ -507,8 +516,8 @@ select.chip option {
 .log li {
   display: flex;
   gap: 6px;
-  color: rgba(244, 233, 241, 0.72);
-  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  color: rgba(27, 44, 56, 0.82);
+  border-left: 2px solid rgba(27, 44, 56, 0.12);
   padding-left: 7px;
   animation: log-in 0.25s ease;
 }
@@ -523,22 +532,22 @@ select.chip option {
 }
 
 .log li.brain {
-  border-color: #ffd479;
+  border-color: #e09619;
 }
 .log li.cerebellum {
-  border-color: #8fb8ff;
+  border-color: #3d7ae6;
 }
 .log li.motor {
-  border-color: #9ef0e0;
+  border-color: #179b80;
 }
 .log li.reflex {
-  border-color: #ff7a9c;
+  border-color: #e44a72;
 }
 .log li.face {
-  border-color: #c79bff;
+  border-color: #8d63e6;
 }
 .log li.cortex {
-  border-color: #ff9fbe;
+  border-color: #28a68a;
 }
 
 @keyframes log-in {
@@ -556,19 +565,19 @@ select.chip option {
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(4, 2, 8, 0.66);
-  backdrop-filter: blur(6px);
+  background: rgba(180, 214, 238, 0.45);
+  backdrop-filter: blur(8px);
 }
 
 .sheet-card {
   width: min(420px, 100%);
   max-height: 86vh;
   overflow-y: auto;
-  background: linear-gradient(180deg, rgba(22, 13, 28, 0.98), rgba(12, 7, 18, 0.99));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(242, 249, 255, 0.99));
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 18px;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 60px rgba(27, 64, 86, 0.18);
 }
 
 .switch {
@@ -600,7 +609,7 @@ select.chip option {
 
 .field input {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.85);
   border-radius: 9px;
   padding: 9px 11px;
   font-size: 12.5px;
@@ -608,7 +617,7 @@ select.chip option {
 }
 
 .field input:focus {
-  border-color: rgba(255, 159, 190, 0.5);
+  border-color: rgba(43, 168, 140, 0.55);
 }
 
 .row {
@@ -619,7 +628,7 @@ select.chip option {
 
 .btn {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.8);
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 12.5px;
@@ -628,15 +637,15 @@ select.chip option {
 }
 
 .btn.primary {
-  background: linear-gradient(135deg, #ff9fbe, #c79bff);
-  color: #210a18;
+  background: linear-gradient(135deg, #28a88b, #4599e4);
+  color: #ffffff;
   font-weight: 600;
   border: 0;
 }
 
 .btn.danger {
-  color: #ff9fae;
-  border-color: rgba(255, 120, 140, 0.3);
+  color: #c83254;
+  border-color: rgba(200, 50, 84, 0.28);
   margin-left: auto;
 }
 
@@ -652,19 +661,19 @@ select.chip option {
   font-size: 11px;
   color: var(--dim);
   line-height: 1.75;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid rgba(27, 44, 56, 0.08);
   padding-top: 10px;
 }
 
 .about summary {
   cursor: pointer;
-  color: rgba(255, 220, 234, 0.7);
+  color: #19564e;
   font-size: 11px;
 }
 
 .about b {
-  color: rgba(255, 210, 228, 0.85);
-  font-weight: 500;
+  color: #1b2c38;
+  font-weight: 600;
 }
 
 /* ————— 开场 ————— */
@@ -672,16 +681,14 @@ select.chip option {
   position: fixed;
   inset: 0;
   z-index: 30;
-  /* 用 flex + margin:auto 做“安全居中”：视口太矮时卡片可以滚动，
-     「进去」按钮永远不会被裁到屏幕外面去。 */
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 18px calc(18px + var(--safe-r)) calc(18px + var(--safe-b)) calc(18px + var(--safe-l));
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: radial-gradient(circle at 50% 30%, rgba(60, 22, 60, 0.85), rgba(6, 4, 10, 0.97) 60%);
-  backdrop-filter: blur(3px);
+  background: radial-gradient(circle at 50% 28%, rgba(255, 252, 240, 0.96), rgba(204, 234, 255, 0.97) 64%);
+  backdrop-filter: blur(4px);
 }
 
 .intro-card {
@@ -690,8 +697,6 @@ select.chip option {
   text-align: left;
 }
 
-/* 最后一道保险：就算 JS 一行都没跑起来，开场卡也会在 4.5 秒后自己淡出并放开点击，
-   不可能把人永远挡在外面。（JS 正常时会在点按的瞬间关掉，用不到这条。） */
 .intro {
   animation: intro-out 0.45s ease 4.5s forwards;
 }
@@ -714,7 +719,7 @@ select.chip option {
 .eyebrow {
   font-size: 10px;
   letter-spacing: 0.42em;
-  color: rgba(255, 190, 216, 0.6);
+  color: rgba(25, 86, 78, 0.65);
   margin: 0 0 10px;
 }
 
@@ -725,7 +730,7 @@ select.chip option {
   letter-spacing: 0.06em;
   margin: 0 0 6px;
   line-height: 1;
-  background: linear-gradient(160deg, #fff 10%, #ffb3cd 55%, #b9a6ff 100%);
+  background: linear-gradient(160deg, #164840 10%, #249b81 55%, #3b86dc 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -734,7 +739,7 @@ select.chip option {
 .lead {
   font-size: 13.5px;
   line-height: 1.8;
-  color: rgba(244, 233, 241, 0.7);
+  color: rgba(27, 44, 56, 0.78);
   margin: 0 0 18px;
 }
 
@@ -746,13 +751,13 @@ select.chip option {
   flex-direction: column;
   gap: 8px;
   font-size: 11.5px;
-  color: rgba(244, 233, 241, 0.55);
+  color: rgba(27, 44, 56, 0.68);
   line-height: 1.7;
 }
 
 .tips b {
-  color: #ffc8dd;
-  font-weight: 500;
+  color: #196b5b;
+  font-weight: 600;
   margin-right: 4px;
 }
 
@@ -775,13 +780,13 @@ select.chip option {
   align-items: baseline;
   padding: 2px 6px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(27, 44, 56, 0.04);
 }
 
 .ver {
   font-size: 9px;
   letter-spacing: 0.08em;
-  color: rgba(244, 233, 241, 0.3);
+  color: rgba(27, 44, 56, 0.42);
   margin-left: 2px;
   align-self: flex-end;
   padding-bottom: 1px;
@@ -797,18 +802,18 @@ select.chip option {
   padding: 8px 10px;
   max-width: 46vw;
   font: 9.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #cfeee6;
-  background: rgba(4, 10, 12, 0.78);
-  border: 1px solid rgba(158, 240, 224, 0.25);
+  color: #173b36;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(43, 168, 140, 0.3);
   border-radius: 8px;
   white-space: pre-wrap;
   pointer-events: none;
 }
 
-.bind-bone { color: rgba(244, 233, 241, 0.55); }
-.bind-arrow { color: rgba(255, 159, 190, 0.5); }
-.bind-param { color: #9ef0e0; letter-spacing: 0.01em; }
-.bind-val { color: #ffc8dd; font-variant-numeric: tabular-nums; }
+.bind-bone { color: rgba(27, 44, 56, 0.65); }
+.bind-arrow { color: rgba(43, 168, 140, 0.7); }
+.bind-param { color: #167a65; letter-spacing: 0.01em; }
+.bind-val { color: #2b6ec8; font-variant-numeric: tabular-nums; }
 
 /* ————— toast ————— */
 .toast {
@@ -816,13 +821,14 @@ select.chip option {
   left: 50%;
   bottom: calc(82px + var(--safe-b));
   transform: translateX(-50%);
-  background: rgba(255, 159, 190, 0.14);
-  border: 1px solid rgba(255, 159, 190, 0.3);
-  color: #ffd9e6;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(43, 168, 140, 0.3);
+  color: #1b2c38;
   font-size: 11.5px;
   padding: 7px 14px;
   border-radius: 999px;
   backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(32, 74, 96, 0.14);
   z-index: 25;
   animation: bubble-in 0.25s ease;
   transition: transform 0.25s, opacity 0.25s;
@@ -841,9 +847,9 @@ select.chip option {
   z-index: 60;
   padding: 10px 13px;
   border-radius: 10px;
-  background: rgba(70, 12, 24, 0.94);
-  border: 1px solid rgba(255, 120, 140, 0.55);
-  color: #ffdde4;
+  background: rgba(255, 240, 244, 0.96);
+  border: 1px solid rgba(205, 50, 80, 0.45);
+  color: #6b1128;
   font-size: 11.5px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -853,7 +859,7 @@ select.chip option {
 @media (max-width: 640px) {
   .drives {
     top: calc(66px + var(--safe-t));
-    width: 78px;
+    width: 84px;
     gap: 7px;
   }
 

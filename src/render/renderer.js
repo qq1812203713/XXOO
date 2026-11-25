@@ -77,59 +77,91 @@ export function createRenderer(canvas) {
   });
 
   // ——————————————————— 背景 ———————————————————
-  function drawBackground(night, arousal) {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    if (night) {
-      g.addColorStop(0, '#05040b');
-      g.addColorStop(0.55, '#0b0713');
-      g.addColorStop(1, '#150c19');
-    } else {
-      g.addColorStop(0, '#0b0710');
-      g.addColorStop(0.5, '#150d1b');
-      g.addColorStop(1, '#1d1020');
-    }
+  function drawBackground(_night, arousal) {
+    // 晴朗明亮的日光天空与柔和地平线过渡（地平线略高于脚底，让地面有纵深感）
+    const horizonY = cam.ground - H * 0.06;
+    const g = ctx.createLinearGradient(0, 0, 0, horizonY);
+    g.addColorStop(0, '#7fc7f8');
+    g.addColorStop(0.45, '#b6e0ff');
+    g.addColorStop(0.84, '#e2f3ff');
+    g.addColorStop(1, '#f1faf7');
     ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // 柔和日光光晕（右上方太阳 + 身后轻柔暖晕）
+    const sunX = W * 0.78;
+    const sunY = H * 0.16;
+    const sun = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, H * 0.48);
+    sun.addColorStop(0, 'rgba(255, 252, 232, 0.92)');
+    sun.addColorStop(0.28, 'rgba(255, 246, 210, 0.36)');
+    sun.addColorStop(1, 'rgba(255, 248, 224, 0)');
+    ctx.fillStyle = sun;
     ctx.fillRect(0, 0, W, H);
 
     const cx = W / 2;
-    const cy = cam.ground - H * 0.32;
-    const halo = ctx.createRadialGradient(cx, cy, 10, cx, cy, H * 0.6);
-    halo.addColorStop(0, `rgba(255,150,190,${0.09 + arousal * 0.07})`);
-    halo.addColorStop(0.45, 'rgba(120,90,200,0.055)');
-    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    const cy = cam.ground - H * 0.38;
+    const halo = ctx.createRadialGradient(cx, cy, 12, cx, cy, H * 0.54);
+    halo.addColorStop(0, `rgba(255, 255, 255, ${0.38 + arousal * 0.14})`);
+    halo.addColorStop(0.5, 'rgba(232, 250, 255, 0.14)');
+    halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, W, H);
+
+    // 轻柔渐变白云
+    ctx.save();
+    const clouds = [
+      { bx: 0.16, y: 0.22, s: 1.05, spd: 4.2 },
+      { bx: 0.68, y: 0.27, s: 0.85, spd: 3.0 },
+      { bx: 0.44, y: 0.13, s: 0.72, spd: 2.4 },
+    ];
+    for (const c of clouds) {
+      const span = W + 280;
+      const x = ((c.bx * W + time * c.spd - cam.x * 0.18 + span) % span) - 140;
+      const y = H * c.y;
+      const r = 30 * c.s;
+      const cg = ctx.createLinearGradient(0, y - r * 1.1, 0, y + r * 0.9);
+      cg.addColorStop(0, 'rgba(255, 255, 255, 0.72)');
+      cg.addColorStop(1, 'rgba(255, 255, 255, 0.12)');
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.arc(x + r * 0.92, y - r * 0.2, r * 0.88, 0, TAU);
+      ctx.arc(x + r * 1.82, y + r * 0.05, r * 0.74, 0, TAU);
+      ctx.arc(x - r * 0.82, y + r * 0.1, r * 0.7, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   function drawGround() {
-    const y = cam.ground;
-    const g = ctx.createLinearGradient(0, y - 40, 0, y + 110);
-    g.addColorStop(0, 'rgba(255,180,210,0.10)');
-    g.addColorStop(0.3, 'rgba(150,120,220,0.05)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
+    const y = cam.ground - H * 0.06;
+    const g = ctx.createLinearGradient(0, y, 0, H);
+    g.addColorStop(0, '#eaf7f1');
+    g.addColorStop(0.22, '#d8ede3');
+    g.addColorStop(1, '#bfe0d2');
     ctx.fillStyle = g;
-    ctx.fillRect(0, y - 40, W, 150);
+    ctx.fillRect(0, y, W, H - y);
 
-    ctx.strokeStyle = 'rgba(255,196,224,0.14)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(W, y);
     ctx.stroke();
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(190,170,255,0.055)';
+    ctx.strokeStyle = 'rgba(66, 132, 118, 0.11)';
     const vpX = W / 2;
     for (let i = -9; i <= 9; i++) {
       const bx = W / 2 + i * cam.scale * 22 - cam.x * cam.scale;
       ctx.beginPath();
-      ctx.moveTo(lerp(bx, vpX, 0.93), y + H * 0.018);
-      ctx.lineTo(bx, y);
+      ctx.moveTo(lerp(bx, vpX, 0.86), y);
+      ctx.lineTo(bx, H);
       ctx.stroke();
     }
-    for (let i = 1; i <= 5; i++) {
-      const yy = y + Math.pow(i, 1.9) * 3 * (H / 700);
-      ctx.globalAlpha = 0.5 / i;
+    for (let i = 1; i <= 4; i++) {
+      const yy = y + Math.pow(i / 4, 1.7) * (H - y);
+      ctx.globalAlpha = 0.45 / i;
       ctx.beginPath();
       ctx.moveTo(0, yy);
       ctx.lineTo(W, yy);
@@ -149,9 +181,9 @@ export function createRenderer(canvas) {
       const p = project(m.x, m.y);
       if (p.x < -20 || p.x > W + 20) continue;
       const a = m.a * (0.6 + 0.4 * Math.sin(t * 1.3 + m.ph));
-      ctx.fillStyle = `rgba(255,220,240,${a})`;
+      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.88, a + 0.18)})`;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, m.r, 0, TAU);
+      ctx.arc(p.x, p.y, m.r * 1.15, 0, TAU);
       ctx.fill();
     }
   }
@@ -841,17 +873,17 @@ export function createRenderer(canvas) {
       const k = r.t / r.life;
       const p = project(r.x, r.y);
       const rad = (5 + k * 30) * (cam.scale / 3);
-      ctx.strokeStyle = `rgba(255,205,230,${(1 - k) * 0.5})`;
-      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = `rgba(38,162,138,${(1 - k) * 0.55})`;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.arc(p.x, p.y, rad, 0, TAU);
       ctx.stroke();
       if (r.kind === 'create') {
-        ctx.fillStyle = `rgba(255,240,200,${(1 - k) * 0.55})`;
+        ctx.fillStyle = `rgba(242,175,58,${(1 - k) * 0.7})`;
         for (let i = 0; i < 6; i++) {
           const a = (i / 6) * TAU + r.t;
           ctx.beginPath();
-          ctx.arc(p.x + Math.cos(a) * rad, p.y + Math.sin(a) * rad * 0.6, 1.3, 0, TAU);
+          ctx.arc(p.x + Math.cos(a) * rad, p.y + Math.sin(a) * rad * 0.6, 1.5, 0, TAU);
           ctx.fill();
         }
       }
@@ -869,7 +901,6 @@ export function createRenderer(canvas) {
 
     drawBackground(night, drives.v.arousal);
     drawGround();
-    // 景物整块撤掉了（树、石头、草）——她要一个人待在画面里。
     drawMotes(dt, time);
 
     if (brain.state.pose && bodyVisible) {
@@ -882,19 +913,13 @@ export function createRenderer(canvas) {
     }
     drawRipples(brain);
 
-    // 地面上的反光
+    // 地面上的明亮日照柔光（偏暖浅晕，避免盖掉脚下投影）
     const feet = project(brain.state.root.x, GROUND_Y);
-    const rg = ctx.createRadialGradient(feet.x, cam.ground + 6, 2, feet.x, cam.ground + 6, 90 * (cam.scale / 3));
-    rg.addColorStop(0, 'rgba(255,170,210,0.10)');
-    rg.addColorStop(1, 'rgba(255,150,200,0)');
+    const rg = ctx.createRadialGradient(feet.x, cam.ground + 18, 2, feet.x, cam.ground + 18, 120 * (cam.scale / 3));
+    rg.addColorStop(0, 'rgba(255,252,238,0.22)');
+    rg.addColorStop(1, 'rgba(255,252,238,0)');
     ctx.fillStyle = rg;
     ctx.fillRect(0, cam.ground - 10, W, H - cam.ground + 10);
-
-    const vg = ctx.createRadialGradient(W / 2, H * 0.5, H * 0.26, W / 2, H * 0.5, H * 0.86);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
   }
 
   // ——————————————————— 局部检视 ———————————————————

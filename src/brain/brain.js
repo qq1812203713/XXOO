@@ -45,7 +45,6 @@ const BODY_WORDS = [
   [/伸懒腰|伸个懒腰|伸展|举手|把手举/, 'stretch'],
   [/握(拳|手|一下)|抓一下|攥/, 'grip'],
   [/走过来|过来|靠近|走两步|走一下|走/, 'walk'],
-  [/转(个)?身|转一圈|转个圈|回头/, 'turn_left'],
   [/伸出?(左|右)?手|伸手/, 'reachR'],
 ];
 
@@ -55,8 +54,6 @@ const BODY_CLIP = {
   shake: 'shake',
   wave: 'wave',
   walk: 'walk',
-  turn_left: 'turnL',
-  turn_right: 'turnR',
   look_left: 'lookL',
   look_right: 'lookR',
   reach_left: 'reachL',
@@ -67,7 +64,7 @@ const BODY_CLIP = {
 };
 const BODY_CN = {
   bow: '弯个腰', nod: '点点头', shake: '摇摇头', wave: '挥挥手',
-  walk: '走两步', turn_left: '往左转', turn_right: '往右转',
+  walk: '走两步',
   look_left: '往左看', look_right: '往右看', reach_left: '伸出左手',
   reach_right: '伸出右手', grip: '握一下手', stretch: '伸个懒腰', rest: '停下来',
 };

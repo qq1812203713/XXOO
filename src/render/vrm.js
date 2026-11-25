@@ -88,20 +88,12 @@ const EXPRESSIONS = {
 };
 
 // 我们一定会去写这些骨骼。测试拿它跟 .vrm 里的 humanoid 列表逐条核对。
-// 可以换的「建模」。都是 VRM 标准骨架，所以同一套动作、同一套 30 根手指全部通用。
-// 想加新的：把 .vrm 丢进 vendor/model/ 下，在这里加一行就行。
+// 仅保留温迪模型（经 pmx.js 归一化为标准 VRM 人形骨架）。
 export const MODELS = {
-  alicia: { url: './vendor/model/alicia/AliciaSolid.vrm', cn: '爱丽丝', note: 'VRoid 官方 · 白裙金发' },
-  sampleA: { url: './vendor/model/sampleA/AvatarSample_A.vrm', cn: '小明', note: 'VRoid 官方样张 A · 制服' },
-  victoria: { url: './vendor/model/victoria/Victoria_Rubin.vrm', cn: '维多利亚', note: 'Victoria Rubin · 成熟体型' },
-  vita: { url: './vendor/model/vita/Vita.vrm', cn: '薇塔', note: 'Vita · 曲线' },
+  wendi: { url: './jianmo/温迪.pmx', type: 'pmx', cn: '温迪', note: 'jianmo/温迪.pmx · 吟游诗人' },
 };
-export const MODEL_ORDER = ['alicia', 'sampleA', 'victoria', 'vita'];
-
-// 有的建模把「外衣」做成独立网格（Alicia 就是这样），可以只穿里面那层。
-export const OUTFITS = {
-  alicia: [{ id: 'light', cn: '清凉', hide: '^cloth' }],
-};
+export const MODEL_ORDER = ['wendi'];
+export const OUTFITS = {};
 
 export const REQUIRED_BONES = (() => {
   const out = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftEye', 'rightEye'];
@@ -121,26 +113,32 @@ export const USED_EXPRESSIONS = [
   ...new Set([...Object.values(EXPRESSIONS).filter(Boolean), 'blink', 'a', 'i', 'u', 'e', 'o', 'neutral']),
 ];
 
-export async function create3DBody({ canvas, modelUrl, onStatus }) {
-  if (!hasWebGL()) return null;
+export async function create3DBody({ canvas, modelUrl, modelType, localTextures, renderer: customRenderer, createCanvas: createCanvasFn, onStatus }) {
+  if (!customRenderer && !hasWebGL()) return null;
   onStatus?.('正在加载 3D 身体…');
   await loadThree();
-  const { VRMLoaderPlugin, VRMUtils } = await import('../../vendor/three-vrm.module.js');
 
-  const renderer = new THREE.WebGLRenderer({
+  const mkCanvas = createCanvasFn || ((w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    return c;
+  });
+
+  const renderer = customRenderer || new THREE.WebGLRenderer({
     canvas,
     alpha: true,
     antialias: true,
     powerPreference: 'high-performance',
     preserveDrawingBuffer: true, // 让画面能被抓下来（自己看，而不是让用户代劳）
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(globalThis.window?.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // 脸贴得很近时，原来的直出会把皮肤打成一团白（高光全clip）。
   // ACES 把高光压回来，睫毛/腮红/瞳孔才有层次。
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
-  renderer.setClearAlpha(0);
+  renderer.toneMappingExposure = 1.04;
+  renderer.setClearAlpha?.(0);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40);
@@ -149,20 +147,43 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 与其反复拧模型，不如把相机放到她脸的那一边 —— 这是几何事实，不会被
   // 矩阵缓存、保存的角度、版本号里的隐藏旋转任何一项抵消。
   const FRONT = -1;
-  const key = new THREE.DirectionalLight(0xfff2f6, 1.45);
-  key.position.set(1.2, 2.4, 2.2 * FRONT);
-  const fill = new THREE.DirectionalLight(0x9fb8ff, 0.45);
-  fill.position.set(-2, 1.2, 1.4 * FRONT);
-  const rim = new THREE.DirectionalLight(0xff9fbe, 0.8);
-  rim.position.set(0.4, 1.6, -2.4 * FRONT);
-  const amb = new THREE.HemisphereLight(0xbfd4ff, 0x281a30, 0.55);
+  // 明亮晴天日光三点布光：主光顺应右上太阳方位，搭配适度冷天光暗部与背向轮廓光，塑造立体光影与反光
+  const key = new THREE.DirectionalLight(0xfff7ea, 2.2);
+  key.position.set(-2.35, 2.25, 1.15 * FRONT);
+  const fill = new THREE.DirectionalLight(0xd4eaff, 0.18);
+  fill.position.set(2.1, 1.0, 1.4 * FRONT);
+  const rim = new THREE.DirectionalLight(0xfff5e2, 0.88);
+  rim.position.set(1.1, 1.85, -2.3 * FRONT);
+  const amb = new THREE.HemisphereLight(0xeaf5ff, 0x95b0bf, 0.56);
   scene.add(key, fill, rim, amb);
 
-  const loader = new GLTFLoader();
-  loader.register((parser) => new VRMLoaderPlugin(parser));
-  const gltf = await loader.loadAsync(modelUrl);
-  const vrm = gltf.userData.vrm;
-  if (!vrm) throw new Error('这个文件不是 VRM（没有 humanoid）');
+  let isPMX = modelType === 'pmx' || /\.pmx($|\?)/i.test(String(modelUrl || ''));
+  if (!isPMX && String(modelUrl || '').startsWith('blob:')) {
+    try {
+      const head = await fetch(modelUrl).then((r) => (r.ok ? r.arrayBuffer() : null));
+      if (head) {
+        const { isPMXBuffer } = await import('./pmx.js');
+        isPMX = isPMXBuffer(head);
+      }
+    } catch {
+      /* 非 PMX 按 VRM 走 */
+    }
+  }
+
+  let vrm = null;
+  let VRMUtils = null;
+  if (isPMX) {
+    const { loadPMXAsVRM } = await import('./pmx.js');
+    vrm = await loadPMXAsVRM(THREE, modelUrl, { localTextures, createCanvas: createCanvasFn });
+  } else {
+    const mod = await import('../../vendor/three-vrm.module.js');
+    VRMUtils = mod.VRMUtils;
+    const loader = new GLTFLoader();
+    loader.register((parser) => new mod.VRMLoaderPlugin(parser));
+    const gltf = await loader.loadAsync(modelUrl);
+    vrm = gltf.userData.vrm;
+  }
+  if (!vrm) throw new Error('这个文件不是有效的 VRM / PMX 身体模型');
 
   // 这个模型到底有哪些表情 —— 不查表写死，直接问它自己。
   // （写死的名字如果不在这具模型里，setValue 会安静地什么也不干，看起来就是「没有表情」。）
@@ -227,11 +248,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     /* 关不掉就算了 */
   }
 
-  // 模型挂在一个外壳上：转动外壳，永远不怕别处改写 vrm.scene.rotation
-  // 注意：旧版本在这里存过“累计偏移”，那是在校正本身还错的时候按出来的，
-  // 现在校正已经对了，再叠加就等于把对的结果又转回去。
-  // 换个新 key，老的脏数据自然失效。
-  const FACE_KEY = 'xxoo.faceYaw.v2';
+  // 模型挂在一个外壳上：确保外部变换不会改写 vrm.scene.rotation
   const holder = new THREE.Group();
   holder.add(vrm.scene);
   scene.add(holder);
@@ -248,8 +265,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   console.log('[world] bbox', bbox.min.y.toFixed(3), bbox.max.y.toFixed(3));
 
   function groundTexture() {
-    const c = document.createElement('canvas');
-    c.width = c.height = 256;
+    const c = mkCanvas(256, 256);
     const g = c.getContext('2d');
     const grad = g.createLinearGradient(0, 0, 256, 256);
     grad.addColorStop(0, '#131a2b');
@@ -276,39 +292,36 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     return tex;
   }
 
-  // 场景全撤了：没有地面网格、没有树、没有石头、没有草。
-  // 她是这画面里唯一的实体，脚下一圈很淡的光只负责让她“站在地上”。
+  // 明亮场景下的脚下柔和接触阴影，让人物稳稳踩在地面上
   const world = { tex: null, props: [], tile: 4.5, span: 27 };
   {
     stage.position.y = floorY;
-    const glowTex = (() => {
-      const c = document.createElement('canvas');
-      c.width = c.height = 128;
+    const shadowTex = (() => {
+      const c = mkCanvas(128, 128);
       const g = c.getContext('2d');
-      const rg = g.createRadialGradient(64, 64, 2, 64, 64, 62);
-      rg.addColorStop(0, 'rgba(255,214,236,0.85)');
-      rg.addColorStop(0.45, 'rgba(240,150,200,0.26)');
-      rg.addColorStop(1, 'rgba(255,150,200,0)');
+      const rg = g.createRadialGradient(64, 64, 4, 64, 64, 60);
+      rg.addColorStop(0, 'rgba(28, 56, 68, 0.44)');
+      rg.addColorStop(0.45, 'rgba(46, 80, 92, 0.18)');
+      rg.addColorStop(1, 'rgba(60, 95, 105, 0)');
       g.fillStyle = rg;
       g.fillRect(0, 0, 128, 128);
       const t = new THREE.CanvasTexture(c);
       t.colorSpace = THREE.SRGBColorSpace;
       return t;
     })();
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.5, 1.5),
+    const shadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.15, 1.15),
       new THREE.MeshBasicMaterial({
-        map: glowTex,
+        map: shadowTex,
         transparent: true,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        opacity: 0.6,
+        opacity: 0.9,
       }),
     );
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = 0.004;
-    glow.renderOrder = -1;
-    stage.add(glow);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.004;
+    shadow.renderOrder = -1;
+    stage.add(shadow);
   }
 
   const node = (name) => vrm.humanoid.getNormalizedBoneNode(name);
@@ -379,23 +392,16 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   vrm.humanoid.update();
   {
     const qs = new URLSearchParams(globalThis.location?.search || '');
-    const forced = Number(qs.get('face'));
-    let extra = 0;
-    if (qs.has('face') && Number.isFinite(forced)) {
-      extra = forced;
-    } else {
-      let saved = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
-      if (Number.isFinite(saved)) {
-        saved = ((saved % 360) + 360) % 360;
-        if (saved > 180) saved -= 360;
-        extra = saved;
-      }
-    }
+    const yaw = Number(qs.get('yaw'));
+    const extra = qs.has('yaw') && Number.isFinite(yaw) ? yaw : 0;
     holder.rotation.y = (extra * Math.PI) / 180;
     scene.updateMatrixWorld(true);
     vrm.humanoid.update();
-    faceProbe = extra ? `手动 ${extra}°` : '相机在她正面';
-    onStatus?.(`已醒来 · 3D 身体（VRM）· ${faceProbe}`);
+    faceProbe = extra ? `调试 ${extra}°` : '相机在她正面';
+    const kindTag = vrm.isPMX
+      ? `PMX${vrm.missingTextures ? ' · 内置贴图' : ''}`
+      : 'VRM';
+    onStatus?.(`已醒来 · 3D 身体（${kindTag}）· ${faceProbe}`);
   }
 
   // ————————————————— 静止姿态采集 —————————————————
@@ -411,10 +417,22 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     rest[name] = { q, dir: null, pos };
   }
 
+  // 显式跳过缺失的可选骨（例如没有 upperChest 时，chest 的下一节直接是 neck，neck 的父骨直接是 chest）
+  const parentOf = (name) => {
+    let p = PARENT.get(name);
+    while (p && !rest[p]) p = PARENT.get(p);
+    return p || null;
+  };
+  const childOf = (name) => {
+    let c = CHILD.get(name);
+    while (c && !rest[c]) c = CHILD.get(c);
+    return c || null;
+  };
+
   // 静止朝向：指向显式链里的下一根骨
   for (const name of ALL_BONE_NAMES) {
     if (!rest[name]) continue;
-    const childName = CHILD.get(name);
+    const childName = childOf(name);
     const b = node(name);
     const c = childName ? node(childName) : null;
     if (b && c) {
@@ -427,7 +445,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 终端骨（指尖、脚趾、头）沿用上一节的朝向
   for (const name of ALL_BONE_NAMES) {
     if (!rest[name] || rest[name].dir) continue;
-    const pName = PARENT.get(name);
+    const pName = parentOf(name);
     if (pName && rest[pName]?.dir) rest[name].dir = rest[pName].dir.clone();
   }
   for (const name of ALL_BONE_NAMES) {
@@ -448,17 +466,38 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const hp = rest.hips;
     if (hp) {
       const p = new THREE.Vector3();
+      const skipMatRe = /hair|eye|face|headphone|ear|brow|teeth|tongue|披风|cape|头发|脸|眼|帽|hat|表情|皮肤|skin/i;
       let w = 0;
       scene.traverse((o) => {
         if (!o.isMesh || !o.geometry?.attributes?.position) return;
         const nm = (o.name || '').toLowerCase();
-        if (/hair|eye|face|headphone|ear|brow|teeth|tongue/.test(nm)) return;
+        if (skipMatRe.test(nm)) return;
         const pos = o.geometry.attributes.position;
+        if (o.geometry.groups?.length > 1 && Array.isArray(o.material) && o.geometry.index) {
+          const idx = o.geometry.index;
+          for (const grp of o.geometry.groups) {
+            const mat = o.material[grp.materialIndex];
+            if (!mat || skipMatRe.test(mat.name || '')) continue;
+            const end = grp.start + grp.count;
+            const step = Math.max(1, Math.floor(grp.count / 12000));
+            for (let g = grp.start; g < end; g += step) {
+              const vi = idx.getX(g);
+              p.fromBufferAttribute(pos, vi).applyMatrix4(o.matrixWorld);
+              if (Math.abs(p.y - (hp.pos.y - 0.02)) > 0.06) continue;
+              const dx = Math.abs(p.x - hp.pos.x);
+              if (dx > 0.28) continue;
+              w = Math.max(w, dx);
+            }
+          }
+          return;
+        }
         const step = Math.max(1, Math.floor(pos.count / 16000));
         for (let i = 0; i < pos.count; i += step) {
           p.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
           if (Math.abs(p.y - (hp.pos.y - 0.02)) > 0.06) continue;
-          w = Math.max(w, Math.abs(p.x - hp.pos.x));
+          const dx = Math.abs(p.x - hp.pos.x);
+          if (dx > 0.28) continue;
+          w = Math.max(w, dx);
         }
       });
       if (w > 0.08) HIP_HALF = w;
@@ -548,7 +587,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
           HAND_LOCAL_REST[sd] = lowerB.q.clone().invert().multiply(handB.q);
         }
       }
-      FINGER_AXIS[sd] = { sign, axes: Object.create(null) };
+      FINGER_AXIS[sd] = { sign, thumbSign: sign, axes: Object.create(null) };
       for (const f of ['Thumb', 'Index', 'Middle', 'Ring', 'Little']) {
         for (const seg of ['Proximal', 'Intermediate', 'Distal']) {
           const name = `${sd}${f}${seg}`;
@@ -557,6 +596,28 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
           FINGER_AXIS[sd].axes[name] = K.clone().applyQuaternion(r.q.clone().invert()).normalize();
           const bone = node(name);
           if (bone) REST_LOCAL.set(name, bone.quaternion.clone());
+        }
+      }
+      // 拇指单独算屈曲轴：垂直于拇指指向与“掌心内侧 + 横跨手掌”合方向，避免沿四指轴向大腿内侧外翻折断
+      const tP = rest[`${sd}ThumbProximal`];
+      const tI = rest[`${sd}ThumbIntermediate`];
+      const tD = rest[`${sd}ThumbDistal`];
+      const tEnd = tD || tI;
+      if (tP && tEnd && PALM_N[sd] && rest[`${sd}LowerArm`]) {
+        const tDir = tEnd.pos.clone().sub(tP.pos);
+        const pnW = PALM_N[sd].clone().applyQuaternion(rest[`${sd}LowerArm`].q).normalize();
+        const inward = pnW.multiplyScalar(0.75).addScaledVector(K, 0.65);
+        if (tDir.lengthSq() > 1e-8 && inward.lengthSq() > 1e-8) {
+          const tAxisW = new V().crossVectors(tDir.normalize(), inward.normalize());
+          if (tAxisW.lengthSq() > 1e-8) {
+            tAxisW.normalize();
+            FINGER_AXIS[sd].thumbSign = 1;
+            for (const seg of ['Proximal', 'Intermediate', 'Distal']) {
+              const name = `${sd}Thumb${seg}`;
+              const r = rest[name];
+              if (r) FINGER_AXIS[sd].axes[name] = tAxisW.clone().applyQuaternion(r.q.clone().invert()).normalize();
+            }
+          }
         }
       }
     }
@@ -620,6 +681,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         if (!o.isMesh) return;
         const nm = o.name || '';
         if (res.some((r) => r.test(nm))) o.visible = false;
+        if (Array.isArray(o.material)) {
+          for (const m of o.material) {
+            if (m && res.some((r) => r.test(m.name || ''))) m.visible = false;
+          }
+        }
       });
     }
   } catch {
@@ -642,8 +708,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   const tmpV3 = new THREE.Vector3();
 
   function layout() {
-    const w = canvas.clientWidth || window.innerWidth || 1;
-    const h = canvas.clientHeight || window.innerHeight || 1;
+    const w = canvas.clientWidth || globalThis.window?.innerWidth || 1;
+    const h = canvas.clientHeight || globalThis.window?.innerHeight || 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     // 竖向构图：脚不能被底下的输入框挡住。
@@ -710,6 +776,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // ————————————————— 每帧：世界四元数累积 —————————————————
   const wq = new Map(); // name -> 这一帧的目标世界四元数
   const aq = new Map(); // name -> 累积的世界增量（相对静止姿态）
+  const bakedLocalQ = new Map(); // name -> 直接以局部四元数烘焙进 Clip 的骨骼（如手指）
   const IDENT = new Q();
 
   // 平滑：每根骨真正写入的四元数会朝目标慢慢追上。
@@ -722,7 +789,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const b = node(name);
     if (!b) return;
     if (!Number.isFinite(targetWorldQ.x + targetWorldQ.y + targetWorldQ.z + targetWorldQ.w)) return;
-    const pName = PARENT.get(name);
+    const pName = parentOf(name);
     const parentQ = pName ? (wq.get(pName) || restWorldQ.get(pName) || IDENT) : IDENT;
     const local = parentQ.clone().invert().multiply(targetWorldQ);
     const prev = applied.get(name);
@@ -757,7 +824,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     const r = rest[name];
     const b = node(name);
     if (!r || !b) return;
-    const pName = PARENT.get(name);
+    const pName = parentOf(name);
     const parentAcc = pName ? aq.get(pName) || IDENT : IDENT;
     eulerTmp.set(eulerWorld.x, eulerWorld.y, eulerWorld.z, 'YXZ');
     const dq = new Q().setFromEuler(eulerTmp);
@@ -796,7 +863,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // /blink + 五个口型）。真实感只能靠组合：眼型（blink 眯眼）+ 眉/嘴的权重 + 视线 + 头颈角度。
   // 所以每个情绪是一整套，不是给一根“肌肉”。
   const EMO = {
-    calm: { joy: 0.26, fun: 0.12, neutral: 0.22 },
+    calm: { joy: 0.08, fun: 0.04, neutral: 0.78 },
     happy: { joy: 0.55, fun: 0.4 },
     shy: { fun: 0.55, joy: 0.3, squint: 0.3, gazeX: -0.35, gazeY: 0.22 },
     love: { joy: 0.6, fun: 0.4, squint: 0.16, gazeX: 0.05, gazeY: -0.05 },
@@ -1098,7 +1165,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         out.push(`${name.padEnd(18)} 骨骼不存在`);
         continue;
       }
-      const childName = CHILD.get(name);
+      const childName = childOf(name);
       const child = childName ? node(childName) : null;
       let actual = null;
       if (child) {
@@ -1134,6 +1201,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   function bakePose(fn) {
     wq.clear();
     aq.clear();
+    bakedLocalQ.clear();
     lastTarget.clear();
     applied.clear();
     BAKING = true;
@@ -1144,9 +1212,12 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     }
     const snap = new Map();
     for (const [bone, world] of wq) {
-      const p = PARENT.get(bone);
+      const p = parentOf(bone);
       const parentWorld = p ? wq.get(p) || restWorldQ.get(p) || IDENT : IDENT;
       snap.set(bone, parentWorld.clone().invert().multiply(world));
+    }
+    for (const [bone, localQ] of bakedLocalQ) {
+      snap.set(bone, localQ.clone());
     }
     return snap;
   }
@@ -1343,11 +1414,11 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   // 手指：30 根，逐节卷曲。轴要跟着手腕一起转，否则手指会朝反方向翻。
   const FINGER_SEGS = ['Proximal', 'Intermediate', 'Distal'];
   const FINGER_WEIGHT = {
-    Thumb: [0.6, 0.75, 0.6],
-    Index: [0.5, 0.9, 0.55],
-    Middle: [0.5, 0.95, 0.6],
-    Ring: [0.5, 0.9, 0.55],
-    Little: [0.55, 0.85, 0.5],
+    Thumb: [0.55, 0.75, 0.65],
+    Index: [0.85, 1.0, 0.72],
+    Middle: [0.9, 1.05, 0.78],
+    Ring: [0.88, 1.0, 0.74],
+    Little: [0.85, 0.95, 0.68],
   };
   // 手指：每根骨在**自己的局部坐标系**里绕屈曲轴转一个固定角度。
   // 不用 aim() —— aim 只保证「朝向」，手指这种多节链一用 aim 就会互相打架、摊成爪子。
@@ -1355,21 +1426,28 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   function poseFingers(bs, curl) {
     const rec = FINGER_AXIS[bs];
     if (!rec) return;
-    // 手休息位：MCP 18°、PIP 23°、DIP 10°；curl 再叠上去（1 ≈ 握拳）
-    const REST_FLEX = [0.31, 0.4, 0.17];
-    const GRIP_FLEX = [0.85, 1.05, 0.45];
+    const c = clamp(curl, 0, 1);
+    // 手指每节是父子串联骨骼：局部旋转直接写该指节自身的弯曲角，不能用 acc += 累加父节角度
+    const REST_FLEX = [0.06, 0.14, 0.10];
+    const GRIP_FLEX = [0.98, 1.18, 0.72];
+    const THUMB_REST = [0.0, 0.06, 0.08];
+    const THUMB_GRIP = [0.24, 0.48, 0.56];
     for (const f of Object.keys(FINGER_WEIGHT)) {
       const w = FINGER_WEIGHT[f];
-      let acc = 0;
+      const isThumb = f === 'Thumb';
+      const sgn = isThumb ? (rec.thumbSign ?? rec.sign) : rec.sign;
       for (let i = 0; i < 3; i++) {
         const name = `${bs}${f}${FINGER_SEGS[i]}`;
         const b = node(name);
         const axis = rec.axes[name];
         if (!b || !axis) continue;
-        acc += REST_FLEX[i] + clamp(curl, 0, 1) * GRIP_FLEX[i] * (w[i] * 1.25);
+        const ang = isThumb
+          ? THUMB_REST[i] + c * THUMB_GRIP[i] * w[i]
+          : REST_FLEX[i] + c * GRIP_FLEX[i] * w[i];
         const q = REST_LOCAL.get(name).clone().multiply(
-          new Q().setFromAxisAngle(axis, rec.sign * acc),
+          new Q().setFromAxisAngle(axis, sgn * ang),
         );
+        if (BAKING) bakedLocalQ.set(name, q.clone());
         const prev = applied.get(name);
         const k = BAKING ? 1 : 1 - Math.exp(-SMOOTH * Math.max(dt || 0, 0.001));
         if (prev && k < 1) {
@@ -1392,7 +1470,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (!lq || !base) return;
     let q = lq.clone().multiply(base);
     if (ax && Number.isFinite(flex) && flex) {
-      q = q.multiply(new Q().setFromAxisAngle(ax, flex));
+      const sgn = FINGER_AXIS[bs]?.sign ?? 1;
+      q = q.multiply(new Q().setFromAxisAngle(ax, sgn * flex));
     }
     writeLocal(`${bs}Hand`, q);
   }
@@ -1413,6 +1492,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         // 这里不能引用 FINGER_SEGS —— 它在本文件更后面才声明（此时是 TDZ）
         for (const sg of ['Proximal', 'Intermediate', 'Distal']) names.push(`${sd}${f}${sg}`);
       }
+      const pnWorld = (PALM_N[sd] && rest[`${sd}LowerArm`])
+        ? PALM_N[sd].clone().applyQuaternion(rest[`${sd}LowerArm`].q).normalize()
+        : null;
       const measure = (sgn, ang) => {
         for (const n of names) {
           const b = node(n);
@@ -1422,6 +1504,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         }
         scene.updateMatrixWorld(true);
         wr.getWorldPosition(pa);
+        if (pnWorld) pa.addScaledVector(pnWorld, 0.06);
         tip.getWorldPosition(pb);
         return pa.distanceTo(pb);
       };
@@ -1430,8 +1513,8 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       let down = 0;
       try {
         straight = measure(1, 0);
-        up = measure(1, 0.7);
-        down = measure(-1, 0.7);
+        up = measure(1, 0.35);
+        down = measure(-1, 0.35);
       } finally {
         for (const n of names) {
           const b = node(n);
@@ -1451,6 +1534,26 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
           const turn = new V().crossVectors(K, mid.dir);
           const pn = PALM_N[sd].clone().applyQuaternion(lower.q);
           if (turn.dot(pn) * rec.sign < 0) PALM_N[sd].negate();
+          // 依据校准后的真实掌心法线，重算拇指“朝掌心内侧收拢”的局部轴
+          const tP = rest[`${sd}ThumbProximal`];
+          const tEnd = rest[`${sd}ThumbDistal`] || rest[`${sd}ThumbIntermediate`];
+          if (tP && tEnd) {
+            const tDir = tEnd.pos.clone().sub(tP.pos);
+            const pnVerified = PALM_N[sd].clone().applyQuaternion(lower.q).normalize();
+            const inward = pnVerified.multiplyScalar(0.75).addScaledVector(K, 0.65);
+            if (tDir.lengthSq() > 1e-8 && inward.lengthSq() > 1e-8) {
+              const tAxisW = new V().crossVectors(tDir.normalize(), inward.normalize());
+              if (tAxisW.lengthSq() > 1e-8) {
+                tAxisW.normalize();
+                rec.thumbSign = 1;
+                for (const sg of ['Proximal', 'Intermediate', 'Distal']) {
+                  const nm = `${sd}Thumb${sg}`;
+                  const rr = rest[nm];
+                  if (rr) rec.axes[nm] = tAxisW.clone().applyQuaternion(rr.q.clone().invert()).normalize();
+                }
+              }
+            }
+          }
         }
       } catch {
         /* 量不出来就算了 */
@@ -1567,7 +1670,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       armR = null,
       swing = 0,
       elbow = 0.16,
-      hand = 0.08,
+      hand = -0.02,
       curl = 0.14,
     } = cfg;
 
@@ -1646,61 +1749,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     poseArm('left', swingDir('left'), 0.3, 0.12, 0.25);
   }
 
-  // 原地转身 —— 按真实的重心转移拆成四段（参考 Animation Mentor 的 turnaround 分解）：
-  //   0.00–0.18  预判：头先转过去，上身跟一点点，脚还没动
-  //   0.18–0.58  主力：胯跟着转，外侧脚抬起、走一条小弧线
-  //   0.58–0.84  落地：脚掌先着地、膝盖吃一下力，上身轻微过冲
-  //   0.84–1.00  收尾：头最后回正，手臂的跟随甩尾
-  function turnPose(dir, k) {
-    shiftHips(0, 0);
-    const seg = (a, b) => clamp((k - a) / (b - a), 0, 1);
-    const sm = (u) => u * u * (3 - 2 * u);
-    const headLead = sm(seg(0, 0.22)) - sm(seg(0.72, 1)) * 0.7; // 头先走、最后收
-    const chestF = sm(seg(0.06, 0.5));
-    const hipF = sm(seg(0.16, 0.7));
-    const settle = sm(seg(0.62, 1));
-    const over = Math.sin(Math.PI * seg(0.5, 0.92)) * 0.14; // 过冲再回来
-    const step = Math.sin(Math.PI * seg(0.2, 0.8)); // 脚抬起-落下的弧
-
-    const hipYaw = dir * (0.62 * hipF + over * 0.4 - 0.04 * (1 - sm(seg(0, 0.3))));
-    const torsoYaw = dir * (0.26 * chestF + 0.1 * headLead - over * 0.5);
-    const hYaw = dir * (0.5 * headLead + over * 0.5);
-
-    turn('hips', { x: FWD(0.02) - step * 0.02, y: hipYaw, z: dir * -0.05 * step });
-    turn('spine', { x: FWD(0.03), y: torsoYaw * 0.5, z: dir * 0.02 * step });
-    turn('chest', { x: FWD(0.02), y: torsoYaw * 0.7 + hipYaw * 0.15, z: 0 });
-    turn('upperChest', { x: 0, y: torsoYaw * 0.3, z: 0 });
-    turn('neck', { x: FWD(0.02), y: hYaw * 0.28, z: 0 });
-    turn('head', { x: FWD(0.02), y: hYaw * 0.6, z: dir * -0.04 * step });
-
-    // 支撑腿：重心压上去，膝盖吃一点力
-    const plantSide = dir > 0 ? 'left' : 'right';
-    const freeSide = dir > 0 ? 'right' : 'left';
-    for (const s of ['left', 'right']) {
-      if (!LEG[s]) continue;
-      const base = LEG[s].ankle;
-      if (s === freeSide) {
-        // 抬起来的那只脚：弧线往前上方摆，落地时已经换了个朝向
-        const t = base.clone();
-        t.y += step * 0.075;
-        t.x += dir * step * 0.035;
-        t.z += step * 0.03;
-        solveLeg(s, t, 0.014 + step * 0.03);
-        aim(`${s}Foot`, rotateAround(LEG[s].footDir, X_AXIS, step * 0.3));
-      } else {
-        solveLeg(s, base, 0.006 + settle * 0.014);
-        aim(`${s}Foot`, LEG[s].footDir.clone());
-      }
-    }
-    void plantSide;
-    // 手臂：甩尾 —— 起步慢半拍，停下还在动
-    const lag = Math.sin(Math.PI * seg(0.1, 0.95)) * 0.16;
-    const armSwing = (side) =>
-      rotateAround(ARM_HANG[side], X_AXIS, dir * lag * (side === 'L' ? 1.0 : -0.8));
-    poseArm('right', armSwing('L'), 0.24 + step * 0.06, 0.1, 0.16);
-    poseArm('left', armSwing('R'), 0.24 + step * 0.06, 0.1, 0.16);
-  }
-
   const CLIPS = {
     idle: safeClip('idle', [
       { t: 0, fn: () => basePose({ breath: 0, sway: 0, headYaw: 0, curl: 0.12 }) },
@@ -1714,9 +1762,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       const p = i / 24;
       return { t: p * WALK.T, fn: () => walkPose(p) };
     })),
-    // 转身 1.5 秒：预判 0.25s + 转体 0.7s + 落地收尾 0.55s。快过这个数就一定像瞬移。
-    turnL: safeClip('turnL', Array.from({ length: 13 }, (_, i) => ({ t: (i / 12) * 1.5, fn: () => turnPose(1, i / 12) }))),
-    turnR: safeClip('turnR', Array.from({ length: 13 }, (_, i) => ({ t: (i / 12) * 1.5, fn: () => turnPose(-1, i / 12) }))),
     // 手指：握一下再张开（30 根一起，是“她真的在用手”的证据）
     grip: safeClip('grip', [
       { t: 0, fn: () => basePose({ curl: 0.15 }) },
@@ -1848,28 +1893,14 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
   });
 
   // ————————————————— 她自己去哪 —————————————————
-  // 走路用“世界反过来动”的办法：镜头不离她，她永远面对你；
-  // 转身 = 世界绕她转过去一点 + 身上放一段原地转身的动作。
+  // 走路用“世界反过来动”的办法：镜头不离她，她永远面对你。
   const nav = {
     mode: 'idle',
     until: 2.2,
     yaw: 0,
-    yawFrom: 0,
-    yawTo: 0,
-    t0: 0,
-    dir: 1,
     travel: new V(),
     walked: 0,
   };
-
-  function startTurn(dir) {
-    nav.mode = 'turn';
-    nav.dir = dir;
-    nav.t0 = t;
-    nav.yawFrom = nav.yaw;
-    nav.yawTo = nav.yaw + dir * (0.6 + Math.random() * 0.45);
-    playAction(dir > 0 ? 'turnL' : 'turnR', 0.22);
-  }
 
   function startWalk(sec) {
     nav.mode = 'walk';
@@ -1916,8 +1947,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     if (wish && wish.id && wish.id !== wishSeen) {
       wishSeen = wish.id;
       if (wish.clip === 'walk') return { walk: true, sec: 2.6 };
-      if (wish.clip === 'turnL') return { turn: -1 };
-      if (wish.clip === 'turnR') return { turn: 1 };
+      if (!actions[wish.clip]) return null;
       return { clip: wish.clip, hold: 2.6 };
     }
 
@@ -1934,7 +1964,9 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         return { clip: Math.random() < 0.5 ? 'reachL' : 'reachR', hold: 1.6 };
       }
       case 'wander':
-        return Math.random() < 0.55 ? { walk: true, sec: 2.8 } : { turn: Math.random() < 0.5 ? -1 : 1 };
+        return Math.random() < 0.55
+          ? { walk: true, sec: 2.8 }
+          : { clip: Math.random() < 0.5 ? 'lookL' : 'lookR', hold: 2.4 };
       case 'arrange':
         return { clip: Math.random() < 0.5 ? 'reachL' : 'reachR', hold: 1.8 };
       case 'observe':
@@ -1964,17 +1996,7 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
       applyStage();
       return;
     }
-    if (nav.mode === 'turn') {
-      // 1.5 秒，而且开头先反向「预备」一下 —— 这是真人转身的做法，不是瞬间掉头
-      const k = clamp((t - nav.t0) / 1.5, 0, 1);
-      const pre = k < 0.16 ? -0.06 * Math.sin((k / 0.16) * Math.PI * 0.5) : 0;
-      const e = Math.max(0, k * k * (3 - 2 * k) + pre);
-      nav.yaw = nav.yawFrom + (nav.yawTo - nav.yawFrom) * e;
-      if (k >= 1) {
-        nav.mode = 'idle';
-        nav.until = t + 0.8;
-      }
-    } else if (nav.mode === 'walk') {
+    if (nav.mode === 'walk') {
       nav.travel.z -= WALK.speed * dt; // 她朝自己的前方走，脚下的地往后滑
       nav.walked += WALK.speed * dt;
       if (t > nav.until) {
@@ -1985,7 +2007,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     } else if (t > nav.until && current === 'idle') {
       const cue = cueFromBrain();
       if (cue && cue.walk) startWalk(cue.sec || 2.6);
-      else if (cue && cue.turn) startTurn(cue.turn);
       else if (cue && cue.clip) {
         playAction(cue.clip, 0.28);
         nav.until = t + (cue.hold || 2.2);
@@ -2149,22 +2170,6 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
     },
     // 她现在在演哪一段 —— 让“神经系统”里写的字和画面对得上
     action: () => ({ clip: current, count: actsPlayed, nav: nav.mode, walked: nav.walked }),
-    // 手动转身：每按一次 +deg（默认 180），并记住到下次打开
-    turnBody(deg = 180) {
-      holder.rotation.y += (deg * Math.PI) / 180;
-      scene.updateMatrixWorld(true);
-      vrm.humanoid.update();
-      const f = measureFacing();
-      try {
-        const prev = Number(globalThis.localStorage?.getItem(FACE_KEY) || 0);
-        const next = ((((Number.isFinite(prev) ? prev : 0) + deg) % 360) + 360) % 360;
-        globalThis.localStorage?.setItem(FACE_KEY, String(next));
-      } catch {
-        /* 隐私模式 */
-      }
-      faceProbe = `手动 ${deg}°`;
-      return f ? (Math.atan2(f.x, f.z) * 180) / Math.PI : NaN;
-    },
     // 把内部状态摊开：骨骼有没有真的被写进去
     debugState() {
       const q = (n) => {
@@ -2300,10 +2305,19 @@ export async function create3DBody({ canvas, modelUrl, onStatus }) {
         const src = renderer.domElement;
         const w = Math.min(maxW, src.width);
         const h = Math.round((src.height / src.width) * w);
-        const c2 = document.createElement('canvas');
-        c2.width = w;
-        c2.height = h;
+        const c2 = mkCanvas(w, h);
         const ctx = c2.getContext('2d');
+        const bgCanvas = globalThis.document?.getElementById?.('stage');
+        if (bgCanvas && bgCanvas.width > 0 && bgCanvas.height > 0) {
+          ctx.drawImage(bgCanvas, 0, 0, w, h);
+        } else {
+          const g = ctx.createLinearGradient(0, 0, 0, h);
+          g.addColorStop(0, '#9bd6ff');
+          g.addColorStop(0.7, '#eaf6ff');
+          g.addColorStop(1, '#dceee4');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, w, h);
+        }
         ctx.drawImage(src, 0, 0, w, h);
         return c2.toDataURL('image/jpeg', 0.85);
       } catch {

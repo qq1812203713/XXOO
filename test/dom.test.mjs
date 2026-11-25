@@ -64,6 +64,8 @@ console.error = (...args) => {
 
 // —— 真正加载应用 ——
 await import('../src/main.js');
+if (document.getElementById('model') !== null) throw new Error('应去掉模型选择下拉框 #model');
+if (document.getElementById('flip') !== null) throw new Error('应去掉转身按钮 #flip');
 
 // —— 开场遮罩必须真的能关掉（display:grid 会盖掉 hidden，这是必测点）——
 const introEl = document.getElementById('intro');
