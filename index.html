@@ -3,23 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-    <meta name="theme-color" content="#07050c" />
+    <meta name="theme-color" content="#d8ecff" />
     <meta name="build" content="__BUILD__" />
-    <meta name="version" content="46" />
+    <meta name="version" content="47" />
     <meta http-equiv="Cache-Control" content="no-store" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="description" content="息 —— 住在手机里的一具神经系统：会呼吸、会累、会自己找事情做。" />
     <title>息 · XXOO</title>
-    <link rel="stylesheet" href="./assets/styles.css?v=56" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%23ffb4c8' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23ffb4c8'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./assets/styles.css?v=57" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%232ba88c' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%232ba88c'/%3E%3C/svg%3E" />
   </head>
   <body>
     <canvas id="stage" aria-label="息的世界"></canvas>
     <canvas id="girl" aria-hidden="true"></canvas>
     <canvas id="girl3d" aria-hidden="true"></canvas>
     <div id="bodyhint" hidden></div>
-    <noscript><p style="position:fixed;inset:0;display:grid;place-items:center;color:#f4e9f1">需要开启 JavaScript 才能见到她。</p></noscript>
+    <noscript><p style="position:fixed;inset:0;display:grid;place-items:center;color:#1b2c38">需要开启 JavaScript 才能见到他。</p></noscript>
 
     <div class="bubble" id="bubble" hidden>
       <span id="bubble-text"></span>
@@ -35,10 +35,8 @@
         </div>
       </div>
       <div class="hud-actions">
-        <button class="chip" id="faceview" title="凑近看她的脸">看脸</button>
-        <select class="chip" id="model" title="换一具身体" aria-label="换一具身体"></select>
+        <button class="chip" id="faceview" title="凑近看他的脸">看脸</button>
         <select class="chip" id="expr" title="固定一个表情" aria-label="固定一个表情"></select>
-        <button class="chip" id="flip" title="让她转身 180°">转身</button>
         <button class="chip" id="speed" title="时间流速">1×</button>
         <button class="chip" id="open-nerves">神经</button>
         <button class="chip" id="open-settings">设置</button>
@@ -210,6 +208,6 @@
         }, 3000);
       })();
     </script>
-    <script type="module" src="./src/main.js?v=46"></script>
+    <script type="module" src="./src/main.js?v=47"></script>
   </body>
 </html>

@@ -6,13 +6,14 @@
   "description": "息 —— 一具住在浏览器里的身体：神经、驱力、记忆与一个会自己长大的世界。",
   "scripts": {
     "start": "node serve.mjs",
-    "test": "node test/fuse.test.mjs && node test/sim.test.mjs && node test/bind.test.mjs && node test/vrm.test.mjs && node test/dom.test.mjs",
+    "test": "node test/fuse.test.mjs && node test/sim.test.mjs && node test/bind.test.mjs && node test/vrm.test.mjs && node test/pmx.test.mjs && node test/dom.test.mjs",
     "sim-test": "node test/sim.test.mjs",
     "dom-test": "node test/dom.test.mjs",
     "visual": "node test/visual.mjs",
     "fuse-test": "node test/fuse.test.mjs",
     "bind-test": "node test/bind.test.mjs",
-    "vrm-test": "node test/vrm.test.mjs"
+    "vrm-test": "node test/vrm.test.mjs",
+    "pmx-test": "node test/pmx.test.mjs"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^0.1.100",

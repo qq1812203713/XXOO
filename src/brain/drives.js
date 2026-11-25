@@ -3,11 +3,11 @@
 import { clamp, damp, rand } from '../core/util.js';
 
 export const DRIVE_META = {
-  energy: { label: '疲倦', color: '#8aa8ff', hint: '越高越想坐下休息' },
-  curiosity: { label: '好奇', color: '#ffd479', hint: '越高越想探索、创造' },
-  social: { label: '想见你', color: '#ff9bbd', hint: '越高越想靠近你' },
-  comfort: { label: '不安', color: '#9ef0e0', hint: '越高越需要被安抚' },
-  arousal: { label: '心跳', color: '#ff7a9c', hint: '被触碰后升高，会自己退下去' },
+  energy: { label: '疲倦', color: '#3b73e8', hint: '越高越想坐下休息' },
+  curiosity: { label: '好奇', color: '#d98a12', hint: '越高越想探索、创造' },
+  social: { label: '想见你', color: '#e04f80', hint: '越高越想靠近你' },
+  comfort: { label: '不安', color: '#12997e', hint: '越高越需要被安抚' },
+  arousal: { label: '心跳', color: '#e63b64', hint: '被触碰后升高，会自己退下去' },
 };
 
 const DEFAULTS = { energy: 0.2, curiosity: 0.52, social: 0.42, comfort: 0.34, arousal: 0.08 };

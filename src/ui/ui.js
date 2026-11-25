@@ -17,8 +17,6 @@ const MOOD_LABEL = {
 const CLIP_LABEL = {
   idle: '站着',
   walk: '走路',
-  turnL: '向左转身',
-  turnR: '向右转身',
   lookL: '往左看',
   lookR: '往右看',
   reachL: '伸手',

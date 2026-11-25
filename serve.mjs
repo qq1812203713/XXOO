@@ -50,6 +50,10 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/plain; charset=utf-8',
+  '.pmx': 'application/octet-stream',
+  '.vrm': 'model/gltf-binary',
+  '.glb': 'model/gltf-binary',
+  '.tga': 'image/x-targa',
 };
 
 const server = http.createServer((req, res) => {
